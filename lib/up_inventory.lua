@@ -25,8 +25,11 @@ local function inspect_track_device(track, track_index, dev_index)
   rec.device_path = ok_path and path or nil
   local ok_plugin, isp = pcall(function() return dev.is_plugin end)
   rec.is_plugin = (ok_plugin and isp) and true or false
-  if not rec.is_plugin and rec.device_path then
-    rec.is_plugin = not not up_util.detect_protocol(rec.device_path)
+  if rec.device_path and up_util.is_plugin_path(rec.device_path) then
+    rec.is_plugin = true
+  end
+  if not rec.device_path or up_util.is_native_path(rec.device_path) then
+    rec.is_plugin = false
   end
   local ok_pd, pd = pcall(function() return dev.active_preset_data end)
   if ok_pd then

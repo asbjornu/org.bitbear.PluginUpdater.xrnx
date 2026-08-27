@@ -13,7 +13,7 @@ function up_matching.build_track_pool(song, yield_fn)
     local ok, infos = pcall(function() return track.available_device_infos end)
     if ok and infos then
       for _, info in ipairs(infos) do
-        if info.is_plugin and info.device_path and not seen[info.device_path] then
+        if up_util.is_plugin_path(info.device_path) and info.device_path and not seen[info.device_path] then
           seen[info.device_path] = true
           local a = up_util.analyze_plugin(info.device_path, info.device_name)
           a.path = info.device_path
@@ -38,7 +38,7 @@ function up_matching.build_instrument_pool(song, yield_fn)
     if ok and infos then
       for _, info in ipairs(infos) do
         local p = info.path or info.name
-        if p and not seen[p] then
+        if p and up_util.is_plugin_path(p) and not seen[p] then
           seen[p] = true
           local a = up_util.analyze_plugin(p, info.name)
           a.path = p

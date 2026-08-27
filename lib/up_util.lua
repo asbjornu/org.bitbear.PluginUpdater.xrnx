@@ -17,6 +17,18 @@ function up_util.detect_protocol(s)
   return nil
 end
 
+function up_util.is_native_path(path)
+  if not path then return false end
+  return path:lower():find("native") ~= nil
+end
+
+function up_util.is_plugin_path(path)
+  if not path or up_util.is_native_path(path) then
+    return false
+  end
+  return up_util.detect_protocol(path) ~= nil
+end
+
 function up_util.protocol_rank(p)
   return up_util.PROTOCOL_RANK[p or ""] or 0
 end
