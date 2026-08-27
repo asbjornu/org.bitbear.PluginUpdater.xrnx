@@ -4,7 +4,7 @@ local up_swap = require("up_swap")
 
 local up_core = {}
 
-function up_core.analyze(song, yield_fn)
+function up_core.analyze(song, yield_fn, on_entry)
   local entries = up_inventory.scan(song, yield_fn)
   local track_pool = up_matching.build_track_pool(song, yield_fn)
   local inst_pool = up_matching.build_instrument_pool(song, yield_fn)
@@ -15,11 +15,15 @@ function up_core.analyze(song, yield_fn)
     end
     local pool = (rec.kind == "track") and track_pool or inst_pool
     local candidates = up_matching.find_candidates(pool, rec.analysis)
-    table.insert(results, {
+    local result = {
       entry = rec,
       candidates = candidates,
       candidate = candidates[1],
-    })
+    }
+    table.insert(results, result)
+    if on_entry then
+      on_entry(result)
+    end
   end
   return results
 end

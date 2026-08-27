@@ -65,7 +65,7 @@ function up_ui.summary()
   return "Done. " .. table.concat(parts, "   ")
 end
 
-function up_ui.rebuild_list()
+function up_ui.clear_list()
   local vb = up_ui._vb
   local list_box = up_ui._list_box
   if up_ui._row_containers then
@@ -74,8 +74,6 @@ function up_ui.rebuild_list()
     end
   end
   up_ui._row_containers = {}
-
-  local results = up_ui._results or {}
   up_ui._row_views = {}
 
   local header = vb:row{
@@ -86,37 +84,32 @@ function up_ui.rebuild_list()
   }
   list_box:add_child(header)
   table.insert(up_ui._row_containers, header)
+end
 
-  if #results == 0 then
-    local t = vb:text{ text = "No plugin devices found in the current song." }
-    list_box:add_child(t)
-    table.insert(up_ui._row_containers, t)
-    return
-  end
+function up_ui.add_row(result)
+  local vb = up_ui._vb
+  local list_box = up_ui._list_box
+  local rec = result.entry
+  local cands = result.candidates or {}
+  local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
 
-  for _, r in ipairs(results) do
-    local rec = r.entry
-    local cands = r.candidates or {}
-    local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
-
-    local popup
-    if #cands == 0 then
-      popup = vb:popup{ items = { "(no replacement available)" }, value = 1, active = false, width = 320 }
-    else
-      local items = {}
-      for _, c in ipairs(cands) do
-        table.insert(items, c.path or c.raw)
-      end
-      popup = vb:popup{ items = items, value = 1, width = 320 }
+  local popup
+  if #cands == 0 then
+    popup = vb:popup{ items = { "(no replacement available)" }, value = 1, active = false, width = 320 }
+  else
+    local items = {}
+    for _, c in ipairs(cands) do
+      table.insert(items, c.path or c.raw)
     end
-
-    local result_txt = vb:text{ text = "", width = 220 }
-    table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
-
-    local row = vb:row{ margin = 0, spacing = 6, old_tf, popup, result_txt }
-    list_box:add_child(row)
-    table.insert(up_ui._row_containers, row)
+    popup = vb:popup{ items = items, value = 1, width = 320 }
   end
+
+  local result_txt = vb:text{ text = "", width = 220 }
+  table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
+
+  local row = vb:row{ margin = 0, spacing = 6, old_tf, popup, result_txt }
+  list_box:add_child(row)
+  table.insert(up_ui._row_containers, row)
 end
 
 function up_ui.start_scan()
@@ -128,15 +121,21 @@ function up_ui.start_scan()
   if up_ui._status_text then
     up_ui._status_text.text = "Scanning the song, please wait..."
   end
+  up_ui.clear_list()
   up_ui._scan_notifier = up_slicer.run(
     function()
-      local results = up_core.analyze(song, function() coroutine.yield() end)
-      up_ui._results = results
+      local count = 0
+      up_ui._results = up_core.analyze(
+        song,
+        function() coroutine.yield() end,
+        function(result)
+          up_ui.add_row(result)
+          count = count + 1
+        end)
       coroutine.yield()
-      up_ui.rebuild_list()
       if up_ui._status_text then
         up_ui._status_text.text = string.format(
-          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #results)
+          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", count)
       end
       if up_ui._upgrade_btn then
         up_ui._upgrade_btn.active = true
@@ -208,7 +207,7 @@ function up_ui.show_dialog()
   local vb = renoise.ViewBuilder()
   up_ui._vb = vb
 
-  local status_text = vb:text{ text = "Opening..." }
+  local status_text = vb:text{ text = "Opening...", width = 760 }
   local list_box = vb:column{ width = 880, spacing = 1 }
   local upgrade_btn = vb:button{
     text = "Upgrade",
@@ -223,7 +222,6 @@ function up_ui.show_dialog()
     vb:row{
       width = 880,
       status_text,
-      vb:space{},
       upgrade_btn,
     },
   }
