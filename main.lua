@@ -6,7 +6,7 @@ package.path = tool_bundle .. "/?.lua;"
 local up_ui = require("up_ui")
 
 renoise.tool():add_menu_entry{
-  name = "Main Menu:Tools:Upgrade Outdated Plugins...",
+  name = "Main Menu:Tools:Plugin Updater",
   invoke = function() up_ui.show_dialog() end,
 }
 
