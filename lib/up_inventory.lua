@@ -47,9 +47,12 @@ local function inspect_track_device(track, track_index, dev_index)
   return rec
 end
 
-function up_inventory.scan(song, yield_fn)
+function up_inventory.scan(song, yield_fn, on_progress)
   local entries = {}
   for ti = 1, #song.tracks do
+    if on_progress then
+      on_progress("Scanning tracks", ti, #song.tracks)
+    end
     if yield_fn then
       yield_fn()
     end
@@ -66,6 +69,9 @@ function up_inventory.scan(song, yield_fn)
     end
   end
   for ii = 1, #song.instruments do
+    if on_progress then
+      on_progress("Scanning instruments", ii, #song.instruments)
+    end
     if yield_fn then
       yield_fn()
     end

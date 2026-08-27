@@ -2,10 +2,13 @@ local up_util = require("up_util")
 
 local up_matching = {}
 
-function up_matching.build_track_pool(song, yield_fn)
+function up_matching.build_track_pool(song, yield_fn, on_progress)
   local pool = {}
   local seen = {}
   for ti = 1, #song.tracks do
+    if on_progress then
+      on_progress("Indexing track plugins", ti, #song.tracks)
+    end
     if yield_fn then
       yield_fn()
     end
@@ -25,10 +28,13 @@ function up_matching.build_track_pool(song, yield_fn)
   return pool
 end
 
-function up_matching.build_instrument_pool(song, yield_fn)
+function up_matching.build_instrument_pool(song, yield_fn, on_progress)
   local pool = {}
   local seen = {}
   for ii = 1, #song.instruments do
+    if on_progress then
+      on_progress("Indexing instrument plugins", ii, #song.instruments)
+    end
     if yield_fn then
       yield_fn()
     end

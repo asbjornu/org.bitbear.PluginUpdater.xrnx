@@ -126,28 +126,25 @@ function up_ui.start_scan()
     up_ui._status_text.text = "Scanning the song..."
   end
   up_ui.clear_list()
-  local found_any = false
-  local step = 0
+  local on_progress = function(phase, cur, total)
+    if up_ui._status_text then
+      up_ui._status_text.text = string.format("%s (%d/%d)...", phase, cur, total)
+    end
+  end
   up_ui._scan_notifier = up_slicer.run(
     function()
       local count = 0
       up_ui._results = up_core.analyze(
         song,
-        function()
-          step = step + 1
-          if not found_any and up_ui._status_text then
-            up_ui._status_text.text = string.format("Scanning the song... (step %d)", step)
-          end
-          coroutine.yield()
-        end,
+        function() coroutine.yield() end,
         function(result)
-          found_any = true
           up_ui.add_row(result)
           count = count + 1
           if up_ui._status_text then
             up_ui._status_text.text = string.format("Found %d: %s", count, old_label(result.entry))
           end
-        end)
+        end,
+        on_progress)
       coroutine.yield()
       if up_ui._status_text then
         up_ui._status_text.text = string.format(

@@ -4,12 +4,16 @@ local up_swap = require("up_swap")
 
 local up_core = {}
 
-function up_core.analyze(song, yield_fn, on_entry)
-  local entries = up_inventory.scan(song, yield_fn)
-  local track_pool = up_matching.build_track_pool(song, yield_fn)
-  local inst_pool = up_matching.build_instrument_pool(song, yield_fn)
+function up_core.analyze(song, yield_fn, on_entry, on_progress)
+  local entries = up_inventory.scan(song, yield_fn, on_progress)
+  local track_pool = up_matching.build_track_pool(song, yield_fn, on_progress)
+  local inst_pool = up_matching.build_instrument_pool(song, yield_fn, on_progress)
   local results = {}
-  for _, rec in ipairs(entries) do
+  local n = #entries
+  for i, rec in ipairs(entries) do
+    if on_progress then
+      on_progress("Checking plugins", i, n)
+    end
     if yield_fn then
       yield_fn()
     end
