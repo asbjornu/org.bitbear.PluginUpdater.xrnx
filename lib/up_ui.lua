@@ -228,10 +228,10 @@ function up_ui.show_dialog()
     margin = 10,
     spacing = 8,
     vb:row{ list_box },
-    vb:row{
+    vb:horizontal_aligner{
+      mode = "justify",
       width = "100%",
       status_text,
-      vb:space{ width = "100%" },
       upgrade_btn,
     },
   }
