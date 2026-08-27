@@ -3,46 +3,38 @@ local up_util = require("up_util")
 local up_matching = {}
 
 local function track_infos(track)
-  local ok, infos = pcall(function() return track.available_device_infos end)
-  if not up_matching._dbg_track then
-    up_matching._dbg_track = true
-    print(string.format("[PluginUpdater] available_device_infos: ok=%s type=%s",
-      tostring(ok), type(infos)))
-    if ok and infos then
-      local n = (type(infos) == "table" or type(infos) == "userdata") and #infos or -1
-      print(string.format("[PluginUpdater]   n=%s", tostring(n)))
-      pcall(function()
-        local c = 0
-        for i, d in ipairs(infos) do
-          c = c + 1
-          if c <= 5 then
-            print(string.format("    [%d] type=%s path=%s name=%s",
-              i, type(d), tostring(d and d.device_path), tostring(d and d.device_name)))
+  -- Prefer available_devices: it returns a plain string list of full device
+  -- paths (e.g. "Audio/Effects/VST/FabFilter Pro-Q 3"). available_device_infos
+  -- returns DeviceInfo objects whose device_path field is nil in this binding.
+  local ok, strs = pcall(function() return track.available_devices end)
+  if ok and strs and #strs > 0 then
+    if not up_matching._dbg_track then
+      up_matching._dbg_track = true
+      local plugin_n, native_n = 0, 0
+      for _, p in ipairs(strs) do
+        if up_util.is_native_path(p) then native_n = native_n + 1 else plugin_n = plugin_n + 1 end
+      end
+      print(string.format("[PluginUpdater] available_devices: total=%d plugin=%d native=%d",
+        #strs, plugin_n, native_n))
+      local shown = 0
+      for i, p in ipairs(strs) do
+        if not up_util.is_native_path(p) then
+          shown = shown + 1
+          if shown <= 8 then
+            print(string.format("    plugin %s", tostring(p)))
           end
-        end
-      end)
-    end
-    local ok2, strs = pcall(function() return track.available_devices end)
-    print(string.format("[PluginUpdater] available_devices: ok=%s type=%s",
-      tostring(ok2), type(strs)))
-    if ok2 and strs then
-      if type(strs) == "table" then
-        for i = 1, math.min(5, #strs) do
-          print(string.format("    [%d] %s", i, tostring(strs[i])))
         end
       end
     end
-  end
-  if ok and infos then
-    return infos
-  end
-  local ok2, strs = pcall(function() return track.available_devices end)
-  if ok2 and strs then
     local out = {}
     for _, p in ipairs(strs) do
       out[#out + 1] = { device_path = p, device_name = p }
     end
     return out
+  end
+  local ok2, infos = pcall(function() return track.available_device_infos end)
+  if ok2 and infos and #infos > 0 and infos[1] and infos[1].device_path then
+    return infos
   end
   return nil
 end
