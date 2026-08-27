@@ -319,7 +319,27 @@ function up_ui.show_dialog()
   up_ui._vb = vb
 
   local status_text = vb:text{ text = "Opening..." }
-  local list_box = vb:column{ width = 880, spacing = 1 }
+  local list_box = vb:column{
+    width = 880,
+    spacing = 1,
+    mouse_events = { "wheel" },
+    mouse_handler = function(event)
+      if event.type == "wheel" then
+        local sb = up_ui._scrollbar
+        if sb then
+          local delta = event.wheel_delta or event.delta_y or 0
+          local upper = sb.max - sb.pagestep
+          if upper < 0 then upper = 0 end
+          local nv = sb.value - delta * sb.step
+          if nv < 0 then nv = 0 end
+          if nv > upper then nv = upper end
+          sb.value = nv
+        end
+        return true
+      end
+      return false
+    end,
+  }
   local scrollbar = vb:scrollbar{
     width = 16,
     height = LIST_HEIGHT,
