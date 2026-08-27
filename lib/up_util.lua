@@ -7,7 +7,7 @@ local DETECT_ORDER = { "CLAP", "VST3", "VST2", "VST", "AU", "LV2", "DSSI" }
 local NOISE = { audio = true, effects = true, generators = true, native = true, plugin = true }
 
 function up_util.detect_protocol(s)
-  if not s then return nil end
+  if type(s) ~= "string" then return nil end
   local lower = s:lower()
   for _, tok in ipairs(DETECT_ORDER) do
     if lower:find(tok:lower(), 1, true) then
@@ -18,12 +18,12 @@ function up_util.detect_protocol(s)
 end
 
 function up_util.is_native_path(path)
-  if not path then return false end
+  if type(path) ~= "string" then return false end
   return path:lower():find("native") ~= nil
 end
 
 function up_util.is_plugin_path(path)
-  if not path or up_util.is_native_path(path) then
+  if type(path) ~= "string" or up_util.is_native_path(path) then
     return false
   end
   return up_util.detect_protocol(path) ~= nil

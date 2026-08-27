@@ -31,8 +31,13 @@ function up_matching.build_track_pool(song, yield_fn, on_progress)
     local infos = track_infos(song.tracks[ti])
     if infos then
       for j, info in ipairs(infos) do
-        local dp = info.device_path or info
-        local dn = info.device_name
+        local dp
+        if type(info) == "table" then
+          dp = info.device_path
+        elseif type(info) == "string" then
+          dp = info
+        end
+        local dn = (type(info) == "table") and info.device_name or nil
         if up_util.is_plugin_path(dp) and dp and not seen[dp] then
           seen[dp] = true
           local a = up_util.analyze_plugin(dp, dn)
