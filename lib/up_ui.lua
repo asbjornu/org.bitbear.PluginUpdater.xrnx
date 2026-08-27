@@ -123,18 +123,30 @@ function up_ui.start_scan()
     up_ui._upgrade_btn.active = false
   end
   if up_ui._status_text then
-    up_ui._status_text.text = "Scanning the song, please wait..."
+    up_ui._status_text.text = "Scanning the song..."
   end
   up_ui.clear_list()
+  local found_any = false
+  local step = 0
   up_ui._scan_notifier = up_slicer.run(
     function()
       local count = 0
       up_ui._results = up_core.analyze(
         song,
-        function() coroutine.yield() end,
+        function()
+          step = step + 1
+          if not found_any and up_ui._status_text then
+            up_ui._status_text.text = string.format("Scanning the song... (step %d)", step)
+          end
+          coroutine.yield()
+        end,
         function(result)
+          found_any = true
           up_ui.add_row(result)
           count = count + 1
+          if up_ui._status_text then
+            up_ui._status_text.text = string.format("Found %d: %s", count, old_label(result.entry))
+          end
         end)
       coroutine.yield()
       if up_ui._status_text then
