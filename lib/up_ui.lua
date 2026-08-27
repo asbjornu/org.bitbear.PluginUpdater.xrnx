@@ -1,6 +1,9 @@
 local up_core = require("up_core")
 local up_slicer = require("up_slicer")
 
+local PLUGIN_ROWS_VISIBLE = 12
+local LIST_HEIGHT = 340
+
 local up_ui = {}
 up_ui._dialog = nil
 up_ui._vb = nil
@@ -14,6 +17,12 @@ up_ui._list_box = nil
 up_ui._upgrade_btn = nil
 up_ui._scan_notifier = nil
 up_ui._upgrade_notifier = nil
+up_ui._visible = PLUGIN_ROWS_VISIBLE
+up_ui._header_row = nil
+up_ui._data_rows = nil
+up_ui._mounted = nil
+up_ui._scroll_first = 0
+up_ui._scrollbar = nil
 
 local function old_label(rec)
   local plugin = rec.device_name
@@ -77,13 +86,15 @@ end
 function up_ui.clear_list()
   local vb = up_ui._vb
   local list_box = up_ui._list_box
-  if up_ui._row_containers then
-    for _, row in ipairs(up_ui._row_containers) do
+  if up_ui._mounted then
+    for _, row in ipairs(up_ui._mounted) do
       list_box:remove_child(row)
     end
   end
-  up_ui._row_containers = {}
+  up_ui._mounted = {}
+  up_ui._data_rows = {}
   up_ui._row_views = {}
+  up_ui._scroll_first = 0
 
   local header = vb:row{
     spacing = 6,
@@ -91,13 +102,59 @@ function up_ui.clear_list()
     vb:text{ text = "Replace with", width = 320 },
     vb:text{ text = "Result", width = 220 },
   }
+  up_ui._header_row = header
   list_box:add_child(header)
-  table.insert(up_ui._row_containers, header)
+  table.insert(up_ui._mounted, header)
+  if up_ui._scrollbar then
+    up_ui._scrollbar.max = 0
+    up_ui._scrollbar.value = 0
+  end
+end
+
+function up_ui.apply_scroll()
+  local list_box = up_ui._list_box
+  if up_ui._mounted then
+    for _, row in ipairs(up_ui._mounted) do
+      list_box:remove_child(row)
+    end
+  end
+  up_ui._mounted = {}
+  list_box:add_child(up_ui._header_row)
+  table.insert(up_ui._mounted, up_ui._header_row)
+  local n = #up_ui._data_rows
+  local first = up_ui._scroll_first + 1
+  local last = math.min(up_ui._scroll_first + up_ui._visible, n)
+  for i = first, last do
+    local row = up_ui._data_rows[i]
+    list_box:add_child(row)
+    table.insert(up_ui._mounted, row)
+  end
+end
+
+function up_ui.refresh_scroll()
+  local n = #up_ui._data_rows
+  local sb = up_ui._scrollbar
+  if sb then
+    sb.max = math.max(0, n - up_ui._visible)
+    if n <= up_ui._visible then
+      up_ui._scroll_first = 0
+    else
+      up_ui._scroll_first = n - up_ui._visible
+    end
+    sb.value = up_ui._scroll_first
+  else
+    up_ui._scroll_first = 0
+  end
+  up_ui.apply_scroll()
+end
+
+function up_ui.on_scroll(value)
+  up_ui._scroll_first = value
+  up_ui.apply_scroll()
 end
 
 function up_ui.add_row(result)
   local vb = up_ui._vb
-  local list_box = up_ui._list_box
   local rec = result.entry
   local cands = result.candidates or {}
   local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
@@ -109,11 +166,10 @@ function up_ui.add_row(result)
   local popup = vb:popup{ items = items, value = (#cands > 0 and 2 or 1), width = 320 }
 
   local result_txt = vb:text{ text = "", width = 220 }
-  table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
-
   local row = vb:row{ margin = 0, spacing = 6, old_tf, popup, result_txt }
-  list_box:add_child(row)
-  table.insert(up_ui._row_containers, row)
+  table.insert(up_ui._data_rows, row)
+  table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
+  up_ui.refresh_scroll()
 end
 
 function up_ui.start_scan()
@@ -224,6 +280,15 @@ function up_ui.show_dialog()
 
   local status_text = vb:text{ text = "Opening..." }
   local list_box = vb:column{ width = 880, spacing = 1 }
+  local scrollbar = vb:scrollbar{
+    width = 16,
+    height = LIST_HEIGHT,
+    min = 0,
+    max = 0,
+    step = 1,
+    autohide = true,
+    notifier = function(v) up_ui.on_scroll(v) end,
+  }
   local upgrade_btn = vb:button{
     text = "Upgrade",
     active = false,
@@ -233,7 +298,10 @@ function up_ui.show_dialog()
   local content = vb:column{
     margin = 10,
     spacing = 8,
-    vb:row{ vb:vertical_scroll{ width = 880, height = 420, list_box } },
+    vb:row{
+      vb:column{ width = 880, height = LIST_HEIGHT, list_box },
+      scrollbar,
+    },
     vb:horizontal_aligner{
       mode = "justify",
       width = "100%",
@@ -245,6 +313,8 @@ function up_ui.show_dialog()
   up_ui._status_text = status_text
   up_ui._list_box = list_box
   up_ui._upgrade_btn = upgrade_btn
+  up_ui._scrollbar = scrollbar
+  up_ui._visible = PLUGIN_ROWS_VISIBLE
 
   up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
   up_ui.start_scan()
