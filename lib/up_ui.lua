@@ -147,11 +147,9 @@ function up_ui.apply_scroll()
     table.insert(up_ui._mounted, row)
   end
   if up_ui._scrollbar and up_ui._header_row then
-    local h = up_ui._header_row.height or 0
+    local h = 0
     for _, r in ipairs(up_ui._mounted) do
-      if r ~= up_ui._header_row then
-        h = h + (r.height or 0)
-      end
+      h = h + (r.height or 0)
     end
     if h > 0 then
       up_ui._scrollbar.height = h
