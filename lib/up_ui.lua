@@ -286,6 +286,7 @@ function up_ui.show_dialog()
     min = 0,
     max = 1,
     step = 1,
+    pagestep = 1,
     autohide = true,
     notifier = function(v) up_ui.on_scroll(v) end,
   }
