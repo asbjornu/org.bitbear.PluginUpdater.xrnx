@@ -11,6 +11,6 @@ renoise.tool():add_menu_entry{
 }
 
 renoise.tool():add_keybinding{
-  name = "Global:PluginUpdater:Upgrade Outdated Plugins",
+  name = "Global:PluginUpdater:Plugin Updater",
   invoke = function() up_ui.show_dialog() end,
 }
