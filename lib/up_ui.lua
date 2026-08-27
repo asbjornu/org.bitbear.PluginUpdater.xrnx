@@ -106,7 +106,7 @@ function up_ui.clear_list()
   list_box:add_child(header)
   table.insert(up_ui._mounted, header)
   if up_ui._scrollbar then
-    up_ui._scrollbar.max = 0
+    up_ui._scrollbar.max = 1
     up_ui._scrollbar.value = 0
   end
 end
@@ -135,7 +135,7 @@ function up_ui.refresh_scroll()
   local n = #up_ui._data_rows
   local sb = up_ui._scrollbar
   if sb then
-    sb.max = math.max(0, n - up_ui._visible)
+    sb.max = math.max(1, n - up_ui._visible)
     if n <= up_ui._visible then
       up_ui._scroll_first = 0
     else
@@ -284,7 +284,7 @@ function up_ui.show_dialog()
     width = 16,
     height = LIST_HEIGHT,
     min = 0,
-    max = 0,
+    max = 1,
     step = 1,
     autohide = true,
     notifier = function(v) up_ui.on_scroll(v) end,
