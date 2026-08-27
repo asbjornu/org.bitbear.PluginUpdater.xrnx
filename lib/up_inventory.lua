@@ -47,7 +47,7 @@ local function inspect_track_device(track, track_index, dev_index)
   return rec
 end
 
-function up_inventory.scan(song, yield_fn, on_progress)
+function up_inventory.scan(song, yield_fn, on_progress, on_found)
   local entries = {}
   for ti = 1, #song.tracks do
     if on_progress then
@@ -64,6 +64,9 @@ function up_inventory.scan(song, yield_fn, on_progress)
         if rec.is_plugin then
           rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name)
           table.insert(entries, rec)
+          if on_found then
+            on_found(rec)
+          end
         end
       end
     end
@@ -117,12 +120,15 @@ function up_inventory.scan(song, yield_fn, on_progress)
       else
         table.insert(rec.notes, "plugin_device is nil (plugin not loaded)")
       end
-      if rec.device_path then
-        rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name or inst.name)
-      else
-        table.insert(rec.notes, "original plugin path unavailable; cannot auto-match")
-      end
-      table.insert(entries, rec)
+       if rec.device_path then
+         rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name or inst.name)
+       else
+         table.insert(rec.notes, "original plugin path unavailable; cannot auto-match")
+       end
+       table.insert(entries, rec)
+       if on_found then
+         on_found(rec)
+       end
     end
   end
   return entries

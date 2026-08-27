@@ -159,7 +159,8 @@ function up_ui.refresh_scroll()
   if sb then
     sb.max = math.max(up_ui._visible, n)
     if n <= up_ui._visible then
-      up_ui._scroll_first = 0
+  up_ui._scroll_first = 0
+  up_ui._fill_idx = 0
     else
       up_ui._scroll_first = n - up_ui._visible
     end
@@ -175,27 +176,37 @@ function up_ui.on_scroll(value)
   up_ui.apply_scroll()
 end
 
-function up_ui.add_row(result)
+function up_ui.found_row(rec)
   local vb = up_ui._vb
-  local rec = result.entry
-  local cands = result.candidates or {}
   local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
-
-  local items = { "Keep current (" .. old_label(rec) .. ")" }
-  for _, c in ipairs(cands) do
-    table.insert(items, c.path or c.raw)
-  end
-  local popup = vb:popup{ items = items, value = (#cands > 0 and 2 or 1), width = 320 }
-
+  local popup = vb:popup{ items = { "(gathering replacements...)" }, value = 1, active = false, width = 320 }
   local result_txt = vb:text{ text = "", width = 220 }
   local row = vb:row{ margin = 0, spacing = 6, old_tf, popup, result_txt }
   table.insert(up_ui._data_rows, row)
-  table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
+  table.insert(up_ui._row_views, { popup = popup, candidates = {}, result_txt = result_txt })
   up_ui.refresh_scroll()
   if not up_ui._row_h and row.height and row.height > 0 then
     up_ui._row_h = row.height
     up_ui.recompute_visible()
   end
+end
+
+function up_ui.fill_row(result)
+  up_ui._fill_idx = (up_ui._fill_idx or 0) + 1
+  local rv = up_ui._row_views[up_ui._fill_idx]
+  if not rv then
+    return
+  end
+  local rec = result.entry
+  local cands = result.candidates or {}
+  local items = { "Keep current (" .. old_label(rec) .. ")" }
+  for _, c in ipairs(cands) do
+    table.insert(items, c.path or c.raw)
+  end
+  rv.popup.items = items
+  rv.popup.value = (#cands > 0 and 2 or 1)
+  rv.popup.active = true
+  rv.candidates = cands
 end
 
 function up_ui.start_scan()
@@ -219,8 +230,11 @@ function up_ui.start_scan()
       up_ui._results = up_core.analyze(
         song,
         function() coroutine.yield() end,
+        function(rec)
+          up_ui.found_row(rec)
+        end,
         function(result)
-          up_ui.add_row(result)
+          up_ui.fill_row(result)
           count = count + 1
           if up_ui._status_text then
             up_ui._status_text.text = string.format("Found %d: %s", count, old_label(result.entry))
