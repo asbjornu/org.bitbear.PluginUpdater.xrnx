@@ -29,6 +29,7 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress)
       on_entry(result)
     end
   end
+  up_core._debug = { track = #track_pool, inst = #inst_pool }
   return results
 end
 

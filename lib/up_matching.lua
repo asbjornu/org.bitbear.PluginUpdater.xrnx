@@ -47,7 +47,7 @@ function up_matching.build_track_pool(song, yield_fn, on_progress)
         dp = info
       end
       local dn = (type(info) == "table") and info.device_name or nil
-      if up_util.is_plugin_path(dp) and dp and not seen[dp] then
+      if dp and not up_util.is_native_path(dp) and not seen[dp] then
         seen[dp] = true
         local a = up_util.analyze_plugin(dp, dn)
         a.path = dp
