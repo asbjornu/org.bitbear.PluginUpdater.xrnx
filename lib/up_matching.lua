@@ -18,7 +18,7 @@ local function track_infos(track)
   return nil
 end
 
-function up_matching.build_track_pool(song, yield_fn, on_progress)
+function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool)
   local pool = {}
   local seen = {}
   local infos = nil
@@ -55,6 +55,19 @@ function up_matching.build_track_pool(song, yield_fn, on_progress)
       end
       if yield_fn and (j % 50 == 0) then
         yield_fn()
+      end
+    end
+  end
+  if #pool == 0 and fallback_pool then
+    for _, a in ipairs(fallback_pool) do
+      local p = tostring(a.path or "")
+        :gsub("[Gg]enerators", "Effects")
+        :gsub("[Gg]enerator", "Effect")
+      if p ~= "" and not up_util.is_native_path(p) and not seen[p] then
+        seen[p] = true
+        local a2 = up_util.analyze_plugin(p, a.product or a.name)
+        a2.path = p
+        table.insert(pool, a2)
       end
     end
   end
