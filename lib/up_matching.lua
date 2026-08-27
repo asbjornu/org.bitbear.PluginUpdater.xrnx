@@ -4,6 +4,35 @@ local up_matching = {}
 
 local function track_infos(track)
   local ok, infos = pcall(function() return track.available_device_infos end)
+  if not up_matching._dbg_track then
+    up_matching._dbg_track = true
+    print(string.format("[PluginUpdater] available_device_infos: ok=%s type=%s",
+      tostring(ok), type(infos)))
+    if ok and infos then
+      local n = (type(infos) == "table" or type(infos) == "userdata") and #infos or -1
+      print(string.format("[PluginUpdater]   n=%s", tostring(n)))
+      pcall(function()
+        local c = 0
+        for i, d in ipairs(infos) do
+          c = c + 1
+          if c <= 5 then
+            print(string.format("    [%d] type=%s path=%s name=%s",
+              i, type(d), tostring(d and d.device_path), tostring(d and d.device_name)))
+          end
+        end
+      end)
+    end
+    local ok2, strs = pcall(function() return track.available_devices end)
+    print(string.format("[PluginUpdater] available_devices: ok=%s type=%s",
+      tostring(ok2), type(strs)))
+    if ok2 and strs then
+      if type(strs) == "table" then
+        for i = 1, math.min(5, #strs) do
+          print(string.format("    [%d] %s", i, tostring(strs[i])))
+        end
+      end
+    end
+  end
   if ok and infos then
     return infos
   end
