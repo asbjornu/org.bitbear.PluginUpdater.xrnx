@@ -19,6 +19,14 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress)
     end
     local pool = (rec.kind == "track") and track_pool or inst_pool
     local candidates = up_matching.find_candidates(pool, rec.analysis)
+    print(string.format(
+      "[PluginUpdater] entry %d/%d: kind=%s path=%q base=%q vendor=%q proto=%s -> %d candidate(s)",
+      i, n, rec.kind, tostring(rec.device_path), tostring(rec.analysis.base),
+      tostring(rec.analysis.vendor), tostring(rec.analysis.protocol), #candidates))
+    for k, c in ipairs(candidates) do
+      print(string.format("    [%d] %q (proto=%s base=%q vendor=%q)", k, c.path,
+        tostring(c.protocol), tostring(c.base), tostring(c.vendor)))
+    end
     local result = {
       entry = rec,
       candidates = candidates,
@@ -30,6 +38,15 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress)
     end
   end
   up_core._debug = { track = #track_pool, inst = #inst_pool }
+  print(string.format("[PluginUpdater] track pool=%d inst pool=%d", #track_pool, #inst_pool))
+  for k, a in ipairs(track_pool) do
+    print(string.format("[PluginUpdater]   track_pool[%d] path=%q base=%q vendor=%q proto=%s",
+      k, a.path, a.base, a.vendor, tostring(a.protocol)))
+  end
+  for k, a in ipairs(inst_pool) do
+    print(string.format("[PluginUpdater]   inst_pool[%d] path=%q base=%q vendor=%q proto=%s",
+      k, a.path, a.base, a.vendor, tostring(a.protocol)))
+  end
   return results
 end
 

@@ -270,16 +270,14 @@ function up_ui.start_scan()
           up_ui.fill_row(result)
           count = count + 1
           if up_ui._status_text then
-            up_ui._status_text.text = string.format("Found %d: %s  [cand=%d]", count, old_label(result.entry), #result.candidates)
+            up_ui._status_text.text = string.format("Found %d: %s", count, old_label(result.entry))
           end
         end,
         on_progress)
       coroutine.yield()
       if up_ui._status_text then
-        local dbg = up_core._debug or {}
         up_ui._status_text.text = string.format(
-          "Found %d plugin device(s) (track pool %d, inst pool %d). Choose a replacement per row, then press 'Upgrade'.",
-          count, dbg.track or 0, dbg.inst or 0)
+          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", count)
       end
       if up_ui._upgrade_btn then
         up_ui._upgrade_btn.active = true
