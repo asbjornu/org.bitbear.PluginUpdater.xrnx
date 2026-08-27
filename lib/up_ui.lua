@@ -146,15 +146,35 @@ function up_ui.apply_scroll()
     list_box:add_child(row)
     table.insert(up_ui._mounted, row)
   end
-  if up_ui._scrollbar and up_ui._header_row then
-    local h = 0
-    for _, r in ipairs(up_ui._mounted) do
-      h = h + (r.height or 0)
+  if up_ui._scrollbar and up_ui._list_col then
+    local h = up_ui._list_col.height
+    if not h or h <= 0 then
+      h = 0
+      for _, r in ipairs(up_ui._mounted) do
+        h = h + (r.height or 0)
+      end
     end
     if h > 0 then
       up_ui._scrollbar.height = h
     end
   end
+end
+
+function up_ui.wheel_scroll(event)
+  if event.type ~= "wheel" then
+    return false
+  end
+  local sb = up_ui._scrollbar
+  if sb then
+    local delta = event.wheel_delta or event.delta_y or 0
+    local upper = sb.max - sb.pagestep
+    if upper < 0 then upper = 0 end
+    local nv = sb.value - delta * sb.step
+    if nv < 0 then nv = 0 end
+    if nv > upper then nv = upper end
+    sb.value = nv
+  end
+  return true
 end
 
 function up_ui.refresh_scroll()
@@ -185,7 +205,13 @@ function up_ui.found_row(rec)
   local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
   local popup = vb:popup{ items = { "(gathering replacements...)" }, value = 1, active = false, width = 320 }
   local result_txt = vb:text{ text = "", width = 220 }
-  local row = vb:row{ margin = 0, spacing = 6, old_tf, popup, result_txt }
+  local row = vb:row{
+    margin = 0,
+    spacing = 6,
+    mouse_events = { "wheel" },
+    mouse_handler = up_ui.wheel_scroll,
+    old_tf, popup, result_txt,
+  }
   table.insert(up_ui._data_rows, row)
   table.insert(up_ui._row_views, { popup = popup, candidates = {}, result_txt = result_txt })
   up_ui.refresh_scroll()
@@ -327,22 +353,7 @@ function up_ui.show_dialog()
     width = 880,
     spacing = 1,
     mouse_events = { "wheel" },
-    mouse_handler = function(event)
-      if event.type == "wheel" then
-        local sb = up_ui._scrollbar
-        if sb then
-          local delta = event.wheel_delta or event.delta_y or 0
-          local upper = sb.max - sb.pagestep
-          if upper < 0 then upper = 0 end
-          local nv = sb.value - delta * sb.step
-          if nv < 0 then nv = 0 end
-          if nv > upper then nv = upper end
-          sb.value = nv
-        end
-        return true
-      end
-      return false
-    end,
+    mouse_handler = up_ui.wheel_scroll,
   }
   local scrollbar = vb:scrollbar{
     width = 16,
@@ -364,6 +375,8 @@ function up_ui.show_dialog()
   local content = vb:column{
     margin = 10,
     spacing = 8,
+    mouse_events = { "wheel" },
+    mouse_handler = up_ui.wheel_scroll,
     vb:row{
       list_col,
       scrollbar,
