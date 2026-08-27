@@ -59,11 +59,23 @@ end
 
 function up_util.analyze_plugin(path, fallback_name)
   local raw = path and path or (fallback_name or "")
-  local protocol = up_util.detect_protocol(raw)
-  local work = raw:lower()
-  if protocol then
-    work = work:gsub(protocol:lower(), "", 1)
+  local protocol = up_util.detect_protocol(raw) or up_util.detect_protocol(fallback_name)
+
+  -- Choose the string we derive the human-readable vendor/product from.
+  -- A plugin path may be a "Protocol: Name" identifier, or a filesystem-style
+  -- category path ("Audio/Generators/VST3/<id>") as returned by instrument
+  -- plugin infos. In the latter case the readable name lives in fallback_name.
+  local display = fallback_name or raw
+  if path and up_util.detect_protocol(path) then
+    local after = path:match("^.-:%s*(.*)$")
+    if after and after ~= "" then
+      display = after
+    end
+  elseif path and path:find("/", 1, true) and fallback_name then
+    display = fallback_name
   end
+
+  local work = display:lower()
   local segs = split_segments(work)
   local vendor = ""
   local product = ""
