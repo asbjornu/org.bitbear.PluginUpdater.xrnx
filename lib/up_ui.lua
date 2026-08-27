@@ -23,6 +23,9 @@ up_ui._data_rows = nil
 up_ui._mounted = nil
 up_ui._scroll_first = 0
 up_ui._scrollbar = nil
+up_ui._row_h = nil
+up_ui._header_h = nil
+up_ui._list_col = nil
 
 local function old_label(rec)
   local plugin = rec.device_name
@@ -103,12 +106,30 @@ function up_ui.clear_list()
     vb:text{ text = "Result", width = 220 },
   }
   up_ui._header_row = header
+  up_ui._header_h = header.height
   list_box:add_child(header)
   table.insert(up_ui._mounted, header)
   if up_ui._scrollbar then
     up_ui._scrollbar.max = up_ui._visible
     up_ui._scrollbar.value = 0
   end
+end
+
+function up_ui.recompute_visible()
+  local hb = renoise.ViewBuilder
+  local header_h = (up_ui._header_h and up_ui._header_h > 0) and up_ui._header_h or hb.DEFAULT_CONTROL_HEIGHT
+  local row_h = (up_ui._row_h and up_ui._row_h > 0) and up_ui._row_h or hb.DEFAULT_CONTROL_HEIGHT
+  local visible = math.max(1, math.floor((LIST_HEIGHT - header_h) / row_h))
+  up_ui._visible = visible
+  local h = header_h + visible * row_h
+  if up_ui._list_col then
+    up_ui._list_col.height = h
+  end
+  if up_ui._scrollbar then
+    up_ui._scrollbar.height = h
+    up_ui._scrollbar.pagestep = visible
+  end
+  up_ui.refresh_scroll()
 end
 
 function up_ui.apply_scroll()
@@ -170,6 +191,10 @@ function up_ui.add_row(result)
   table.insert(up_ui._data_rows, row)
   table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
   up_ui.refresh_scroll()
+  if not up_ui._row_h and row.height and row.height > 0 then
+    up_ui._row_h = row.height
+    up_ui.recompute_visible()
+  end
 end
 
 function up_ui.start_scan()
@@ -296,11 +321,12 @@ function up_ui.show_dialog()
     notifier = function() up_ui.do_upgrade() end,
   }
 
+  local list_col = vb:column{ width = 880, height = LIST_HEIGHT, list_box }
   local content = vb:column{
     margin = 10,
     spacing = 8,
     vb:row{
-      vb:column{ width = 880, height = LIST_HEIGHT, list_box },
+      list_col,
       scrollbar,
     },
     vb:horizontal_aligner{
@@ -315,6 +341,7 @@ function up_ui.show_dialog()
   up_ui._list_box = list_box
   up_ui._upgrade_btn = upgrade_btn
   up_ui._scrollbar = scrollbar
+  up_ui._list_col = list_col
   up_ui._visible = PLUGIN_ROWS_VISIBLE
 
   up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
