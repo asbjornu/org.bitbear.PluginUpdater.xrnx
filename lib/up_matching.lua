@@ -21,6 +21,7 @@ end
 function up_matching.build_track_pool(song, yield_fn, on_progress)
   local pool = {}
   local seen = {}
+  local infos = nil
   for ti = 1, #song.tracks do
     if on_progress then
       on_progress("Indexing track plugins", ti, #song.tracks)
@@ -28,25 +29,32 @@ function up_matching.build_track_pool(song, yield_fn, on_progress)
     if yield_fn then
       yield_fn()
     end
-    local infos = track_infos(song.tracks[ti])
-    if infos then
-      for j, info in ipairs(infos) do
-        local dp
-        if type(info) == "table" then
-          dp = info.device_path
-        elseif type(info) == "string" then
-          dp = info
-        end
-        local dn = (type(info) == "table") and info.device_name or nil
-        if up_util.is_plugin_path(dp) and dp and not seen[dp] then
-          seen[dp] = true
-          local a = up_util.analyze_plugin(dp, dn)
-          a.path = dp
-          table.insert(pool, a)
-        end
-        if yield_fn and (j % 50 == 0) then
-          yield_fn()
-        end
+    if not infos then
+      local t = track_infos(song.tracks[ti])
+      if t and #t > 0 then
+        infos = t
+      end
+    else
+      break
+    end
+  end
+  if infos then
+    for j, info in ipairs(infos) do
+      local dp
+      if type(info) == "table" then
+        dp = info.device_path
+      elseif type(info) == "string" then
+        dp = info
+      end
+      local dn = (type(info) == "table") and info.device_name or nil
+      if up_util.is_plugin_path(dp) and dp and not seen[dp] then
+        seen[dp] = true
+        local a = up_util.analyze_plugin(dp, dn)
+        a.path = dp
+        table.insert(pool, a)
+      end
+      if yield_fn and (j % 50 == 0) then
+        yield_fn()
       end
     end
   end
@@ -56,6 +64,7 @@ end
 function up_matching.build_instrument_pool(song, yield_fn, on_progress)
   local pool = {}
   local seen = {}
+  local infos = nil
   for ii = 1, #song.instruments do
     if on_progress then
       on_progress("Indexing instrument plugins", ii, #song.instruments)
@@ -63,21 +72,28 @@ function up_matching.build_instrument_pool(song, yield_fn, on_progress)
     if yield_fn then
       yield_fn()
     end
-    local ok, infos = pcall(function()
-      return song.instruments[ii].plugin_properties.available_plugin_infos
-    end)
-    if ok and infos then
-      for j, info in ipairs(infos) do
-        local p = info.path or info.name
-        if p and up_util.is_plugin_path(p) and not seen[p] then
-          seen[p] = true
-          local a = up_util.analyze_plugin(p, info.name)
-          a.path = p
-          table.insert(pool, a)
-        end
-        if yield_fn and (j % 50 == 0) then
-          yield_fn()
-        end
+    if not infos then
+      local ok, i = pcall(function()
+        return song.instruments[ii].plugin_properties.available_plugin_infos
+      end)
+      if ok and i and #i > 0 then
+        infos = i
+      end
+    else
+      break
+    end
+  end
+  if infos then
+    for j, info in ipairs(infos) do
+      local p = info.path or info.name
+      if p and up_util.is_plugin_path(p) and not seen[p] then
+        seen[p] = true
+        local a = up_util.analyze_plugin(p, info.name)
+        a.path = p
+        table.insert(pool, a)
+      end
+      if yield_fn and (j % 50 == 0) then
+        yield_fn()
       end
     end
   end
