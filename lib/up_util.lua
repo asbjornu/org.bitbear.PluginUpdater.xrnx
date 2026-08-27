@@ -61,45 +61,27 @@ function up_util.analyze_plugin(path, fallback_name)
   local raw = path and path or (fallback_name or "")
   local protocol = up_util.detect_protocol(raw) or up_util.detect_protocol(fallback_name)
 
-  -- Choose the string we derive the human-readable vendor/product from.
-  -- A plugin path may be a "Protocol: Name" identifier, or a filesystem-style
-  -- category path ("Audio/Generators/VST3/<id>") as returned by instrument
-  -- plugin infos. In the latter case the readable name lives in fallback_name.
-  local display = fallback_name or raw
-  if path and up_util.detect_protocol(path) then
-    local after = path:match("^.-:%s*(.*)$")
-    if after and after ~= "" then
-      display = after
-    end
-  elseif path and path:find("/", 1, true) and fallback_name then
-    display = fallback_name
+  -- Derive the human-readable name from the path tail: drop the protocol folder
+  -- and the generic category folders (audio/effects/generators/native/plugin).
+  -- This yields a consistent vendor/product regardless of how the readable name
+  -- (device_name) is formatted, so an installed plugin matches its siblings.
+  local work = raw:lower()
+  if protocol then
+    work = work:gsub(protocol:lower(), "", 1)
   end
-
-  local work = display:lower()
   local segs = split_segments(work)
+
   local vendor = ""
   local product = ""
   if #segs >= 2 then
     product = segs[#segs]
     vendor = table.concat(segs, " ", 1, #segs - 1)
   elseif #segs == 1 then
-    local first, rest = segs[1]:match("^(%S+)%s+(.+)$")
-    if first and rest then
-      vendor = first
-      product = rest
-    else
-      product = segs[1]
-    end
+    product = segs[1]
   else
     product = (fallback_name or raw)
   end
-  if vendor == "" then
-    local f, r = product:match("^(%S+)%s+(.+)$")
-    if f and r then
-      vendor = f
-      product = r
-    end
-  end
+
   local base = up_util.strip_version(product)
   if base == "" then
     base = product
