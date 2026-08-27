@@ -127,6 +127,7 @@ function up_ui.recompute_visible()
   end
   if up_ui._scrollbar then
     up_ui._scrollbar.height = h
+    up_ui._scrollbar.max = math.max(visible, #up_ui._data_rows)
     up_ui._scrollbar.pagestep = visible
   end
   up_ui.refresh_scroll()
