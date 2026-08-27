@@ -233,7 +233,7 @@ function up_ui.show_dialog()
   local content = vb:column{
     margin = 10,
     spacing = 8,
-    vb:row{ list_box },
+    vb:row{ vb:vertical_scroll{ width = 880, height = 420, list_box } },
     vb:horizontal_aligner{
       mode = "justify",
       width = "100%",
