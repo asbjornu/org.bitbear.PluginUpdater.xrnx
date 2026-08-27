@@ -16,16 +16,25 @@ up_ui._scan_notifier = nil
 up_ui._upgrade_notifier = nil
 
 local function old_label(rec)
-  local name
+  local plugin = rec.device_name
+  local preset
   if rec.kind == "instrument" then
-    name = rec.instrument_name
-  else
-    name = rec.device_name
+    preset = rec.instrument_name
+  elseif rec.active_preset then
+    preset = rec.active_preset
   end
-  if not name or name == "" then
-    name = (rec.analysis and rec.analysis.raw) or "?"
+  if not plugin or plugin == "" then
+    if rec.analysis then
+      plugin = rec.analysis.raw
+    else
+      plugin = preset
+      preset = nil
+    end
   end
-  return name
+  if plugin and preset and preset ~= "" then
+    return string.format("%s  —  %s", plugin, preset)
+  end
+  return plugin or "?"
 end
 
 function up_ui.stop_scan()
@@ -207,7 +216,7 @@ function up_ui.show_dialog()
   local vb = renoise.ViewBuilder()
   up_ui._vb = vb
 
-  local status_text = vb:text{ text = "Opening...", width = 760 }
+  local status_text = vb:text{ text = "Opening...", width = 740 }
   local list_box = vb:column{ width = 880, spacing = 1 }
   local upgrade_btn = vb:button{
     text = "Upgrade",
@@ -221,8 +230,8 @@ function up_ui.show_dialog()
     vb:row{ list_box },
     vb:row{
       width = 880,
-      status_text,
-      upgrade_btn,
+      vb:horizontal_aligner{ mode = "left", width = 760, status_text },
+      vb:horizontal_aligner{ mode = "right", width = 120, upgrade_btn },
     },
   }
 
