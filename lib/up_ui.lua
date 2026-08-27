@@ -216,7 +216,7 @@ function up_ui.show_dialog()
   local vb = renoise.ViewBuilder()
   up_ui._vb = vb
 
-  local status_text = vb:text{ text = "Opening...", width = 740 }
+  local status_text = vb:text{ text = "Opening..." }
   local list_box = vb:column{ width = 880, spacing = 1 }
   local upgrade_btn = vb:button{
     text = "Upgrade",
@@ -229,9 +229,10 @@ function up_ui.show_dialog()
     spacing = 8,
     vb:row{ list_box },
     vb:row{
-      width = 880,
-      vb:horizontal_aligner{ mode = "left", width = 760, status_text },
-      vb:horizontal_aligner{ mode = "right", width = 120, upgrade_btn },
+      width = "100%",
+      status_text,
+      vb:space{ width = "100%" },
+      upgrade_btn,
     },
   }
 
