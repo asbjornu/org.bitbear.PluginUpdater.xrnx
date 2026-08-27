@@ -121,12 +121,7 @@ function up_ui.recompute_visible()
   local row_h = (up_ui._row_h and up_ui._row_h > 0) and up_ui._row_h or hb.DEFAULT_CONTROL_HEIGHT
   local visible = math.max(1, math.floor((LIST_HEIGHT - header_h) / row_h))
   up_ui._visible = visible
-  local h = header_h + visible * row_h
-  if up_ui._list_col then
-    up_ui._list_col.height = h
-  end
   if up_ui._scrollbar then
-    up_ui._scrollbar.height = h
     up_ui._scrollbar.max = math.max(visible, #up_ui._data_rows)
     up_ui._scrollbar.pagestep = visible
   end
@@ -150,6 +145,17 @@ function up_ui.apply_scroll()
     local row = up_ui._data_rows[i]
     list_box:add_child(row)
     table.insert(up_ui._mounted, row)
+  end
+  if up_ui._scrollbar and up_ui._header_row then
+    local h = up_ui._header_row.height or 0
+    for _, r in ipairs(up_ui._mounted) do
+      if r ~= up_ui._header_row then
+        h = h + (r.height or 0)
+      end
+    end
+    if h > 0 then
+      up_ui._scrollbar.height = h
+    end
   end
 end
 
@@ -356,7 +362,7 @@ function up_ui.show_dialog()
     notifier = function() up_ui.do_upgrade() end,
   }
 
-  local list_col = vb:column{ width = 880, height = LIST_HEIGHT, list_box }
+  local list_col = vb:column{ width = 880, list_box }
   local content = vb:column{
     margin = 10,
     spacing = 8,
