@@ -102,16 +102,11 @@ function up_ui.add_row(result)
   local cands = result.candidates or {}
   local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
 
-  local popup
-  if #cands == 0 then
-    popup = vb:popup{ items = { "(no replacement available)" }, value = 1, active = false, width = 320 }
-  else
-    local items = {}
-    for _, c in ipairs(cands) do
-      table.insert(items, c.path or c.raw)
-    end
-    popup = vb:popup{ items = items, value = 1, width = 320 }
+  local items = { "Keep current (" .. old_label(rec) .. ")" }
+  for _, c in ipairs(cands) do
+    table.insert(items, c.path or c.raw)
   end
+  local popup = vb:popup{ items = items, value = (#cands > 0 and 2 or 1), width = 320 }
 
   local result_txt = vb:text{ text = "", width = 220 }
   table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
@@ -163,11 +158,13 @@ function up_ui.do_upgrade()
   for i, r in ipairs(up_ui._results) do
     local rv = up_ui._row_views[i]
     local cands = r.candidates or {}
-    if #cands > 0 and rv and rv.popup then
+    if rv and rv.popup and #cands > 0 then
       local idx = rv.popup.value
-      local chosen = cands[idx]
-      if chosen then
-        table.insert(selected, { result = r, chosen = chosen, rv = rv })
+      if idx >= 2 then
+        local chosen = cands[idx - 1]
+        if chosen then
+          table.insert(selected, { result = r, chosen = chosen, rv = rv })
+        end
       end
     end
   end

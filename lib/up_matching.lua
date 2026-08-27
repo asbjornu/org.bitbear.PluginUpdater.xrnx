@@ -50,6 +50,26 @@ function up_matching.build_instrument_pool(song, yield_fn)
   return pool
 end
 
+function up_matching.vendor_ok(c, old)
+  if old.vendor == "" or c.vendor == "" then
+    return true
+  end
+  return c.vendor == old.vendor
+end
+
+function up_matching.candidate_matches(c, old)
+  if not old then
+    return false
+  end
+  if c.path == old.raw then
+    return false
+  end
+  if c.base ~= old.base then
+    return false
+  end
+  return up_matching.vendor_ok(c, old)
+end
+
 function up_matching.find_candidate(pool, old_analysis)
   if not old_analysis then
     return nil
@@ -57,12 +77,10 @@ function up_matching.find_candidate(pool, old_analysis)
   local best = nil
   local best_rank = nil
   for _, c in ipairs(pool) do
-    if c.family_key == old_analysis.family_key and c.path ~= old_analysis.raw then
-      if up_util.rank(c) > up_util.rank(old_analysis) then
-        if best == nil or up_util.rank(c) > best_rank then
-          best = c
-          best_rank = up_util.rank(c)
-        end
+    if up_matching.candidate_matches(c, old_analysis) then
+      if best == nil or up_util.rank(c) > best_rank then
+        best = c
+        best_rank = up_util.rank(c)
       end
     end
   end
@@ -75,7 +93,7 @@ function up_matching.find_candidates(pool, old_analysis)
   end
   local list = {}
   for _, c in ipairs(pool) do
-    if c.family_key == old_analysis.family_key and c.path ~= old_analysis.raw then
+    if up_matching.candidate_matches(c, old_analysis) then
       table.insert(list, c)
     end
   end
