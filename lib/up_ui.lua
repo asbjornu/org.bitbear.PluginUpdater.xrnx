@@ -1,45 +1,197 @@
 local up_core = require("up_core")
+local up_slicer = require("up_slicer")
 
 local up_ui = {}
 up_ui._dialog = nil
+up_ui._vb = nil
+up_ui._song = nil
+up_ui._closed = false
+up_ui._results = nil
+up_ui._row_views = nil
+up_ui._row_containers = nil
+up_ui._status_text = nil
+up_ui._list_box = nil
+up_ui._upgrade_btn = nil
+up_ui._scan_notifier = nil
+up_ui._upgrade_notifier = nil
 
-function up_ui.format_report(results, dry_run)
-  local lines = {}
-  table.insert(lines, "Plugin Updater - " .. (dry_run and "DRY RUN (no changes made)" or "UPGRADE REPORT"))
-  table.insert(lines, string.rep("=", 64))
-  if #results == 0 then
-    table.insert(lines, "No plugin devices found in the current song.")
+local function old_label(rec)
+  local name
+  if rec.kind == "instrument" then
+    name = rec.instrument_name
+  else
+    name = rec.device_name
   end
+  if not name or name == "" then
+    name = (rec.analysis and rec.analysis.raw) or "?"
+  end
+  return name
+end
+
+function up_ui.stop_scan()
+  if up_ui._scan_notifier then
+    pcall(function()
+      renoise.tool().app_idle_observable:remove_notifier(up_ui._scan_notifier)
+    end)
+    up_ui._scan_notifier = nil
+  end
+end
+
+function up_ui.stop_upgrade()
+  if up_ui._upgrade_notifier then
+    pcall(function()
+      renoise.tool().app_idle_observable:remove_notifier(up_ui._upgrade_notifier)
+    end)
+    up_ui._upgrade_notifier = nil
+  end
+end
+
+function up_ui.stop_all()
+  up_ui.stop_scan()
+  up_ui.stop_upgrade()
+end
+
+function up_ui.summary()
+  local results = up_ui._results or {}
   local counts = {}
   for _, r in ipairs(results) do
-    counts[r.status] = (counts[r.status] or 0) + 1
-    local rec = r.entry
-    local loc = rec.kind == "track"
-      and ("Track " .. rec.track_index .. " [" .. (rec.track_name or "?") .. "] device " .. rec.device_index)
-      or ("Instrument " .. rec.instrument_index .. " [" .. (rec.instrument_name or "?") .. "]")
-    local old_id = (rec.analysis and rec.analysis.raw) or rec.device_name or "?"
-    local line = string.format("[%s]\n  %s\n  old: %s", r.status, loc, old_id)
-    if r.candidate then
-      line = line .. "\n  new: " .. (r.candidate.path or r.candidate.raw)
-    end
-    if rec.broken then
-      line = line .. string.format(
-        "\n  broken=%s path_readable=%s preset_data=%s",
-        tostring(rec.broken),
-        tostring(rec.device_path ~= nil),
-        tostring(rec.preset_data_accessible))
-    end
-    if r.swap and r.swap.detail then
-      line = line .. "\n  note: " .. r.swap.detail
-    end
-    table.insert(lines, line)
+    local s = r.status or (r.candidate and "pending" or "no-candidate")
+    counts[s] = (counts[s] or 0) + 1
   end
-  table.insert(lines, string.rep("=", 64))
-  table.insert(lines, "Summary:")
+  local parts = {}
   for k, v in pairs(counts) do
-    table.insert(lines, string.format("  %s: %d", k, v))
+    table.insert(parts, string.format("%s: %d", k, v))
   end
-  return table.concat(lines, "\n")
+  return "Done. " .. table.concat(parts, "   ")
+end
+
+function up_ui.rebuild_list()
+  local vb = up_ui._vb
+  local list_box = up_ui._list_box
+  if up_ui._row_containers then
+    for _, row in ipairs(up_ui._row_containers) do
+      list_box:remove_child(row)
+    end
+  end
+  up_ui._row_containers = {}
+
+  local results = up_ui._results or {}
+  up_ui._row_views = {}
+
+  local header = vb:row{
+    spacing = 6,
+    vb:text{ text = "Current plugin", width = 320 },
+    vb:text{ text = "Replace with", width = 320 },
+    vb:text{ text = "Result", width = 220 },
+  }
+  list_box:add_child(header)
+  table.insert(up_ui._row_containers, header)
+
+  if #results == 0 then
+    local t = vb:text{ text = "No plugin devices found in the current song." }
+    list_box:add_child(t)
+    table.insert(up_ui._row_containers, t)
+    return
+  end
+
+  for _, r in ipairs(results) do
+    local rec = r.entry
+    local cands = r.candidates or {}
+    local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
+
+    local popup
+    if #cands == 0 then
+      popup = vb:popup{ items = { "(no replacement available)" }, value = 1, active = false, width = 320 }
+    else
+      local items = {}
+      for _, c in ipairs(cands) do
+        table.insert(items, c.path or c.raw)
+      end
+      popup = vb:popup{ items = items, value = 1, width = 320 }
+    end
+
+    local result_txt = vb:text{ text = "", width = 220 }
+    table.insert(up_ui._row_views, { popup = popup, candidates = cands, result_txt = result_txt })
+
+    local row = vb:row{ margin = 0, spacing = 6, old_tf, popup, result_txt }
+    list_box:add_child(row)
+    table.insert(up_ui._row_containers, row)
+  end
+end
+
+function up_ui.start_scan()
+  up_ui.stop_scan()
+  local song = up_ui._song
+  if up_ui._upgrade_btn then
+    up_ui._upgrade_btn.active = false
+  end
+  if up_ui._status_text then
+    up_ui._status_text.text = "Scanning the song, please wait..."
+  end
+  up_ui._scan_notifier = up_slicer.run(
+    function()
+      local results = up_core.analyze(song, function() coroutine.yield() end)
+      up_ui._results = results
+      coroutine.yield()
+      up_ui.rebuild_list()
+      if up_ui._status_text then
+        up_ui._status_text.text = string.format(
+          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #results)
+      end
+      if up_ui._upgrade_btn then
+        up_ui._upgrade_btn.active = true
+      end
+    end,
+    nil,
+    function() return up_ui._closed end)
+end
+
+function up_ui.do_upgrade()
+  if not up_ui._results then
+    return
+  end
+  local song = up_ui._song
+  local selected = {}
+  for i, r in ipairs(up_ui._results) do
+    local rv = up_ui._row_views[i]
+    local cands = r.candidates or {}
+    if #cands > 0 and rv and rv.popup then
+      local idx = rv.popup.value
+      local chosen = cands[idx]
+      if chosen then
+        table.insert(selected, { result = r, chosen = chosen, rv = rv })
+      end
+    end
+  end
+  if #selected == 0 then
+    up_ui._status_text.text = "No replacements selected."
+    return
+  end
+
+  up_ui.stop_scan()
+  up_ui.stop_upgrade()
+  up_ui._upgrade_btn.active = false
+  up_ui._status_text.text = string.format("Upgrading %d plugin(s)...", #selected)
+
+  up_ui._upgrade_notifier = up_slicer.run(
+    function()
+      for _, s in ipairs(selected) do
+        local res = up_core.apply_one(song, s.result, s.chosen)
+        s.result.status = res.status
+        s.result.detail = res.detail
+        if s.rv and s.rv.result_txt then
+          s.rv.result_txt.text = (res.status or "")
+            .. (res.detail and (" - " .. res.detail) or "")
+        end
+        coroutine.yield()
+      end
+    end,
+    function()
+      up_ui._upgrade_btn.active = true
+      up_ui._status_text.text = up_ui.summary()
+      up_ui._upgrade_notifier = nil
+    end,
+    function() return up_ui._closed end)
 end
 
 function up_ui.show_dialog()
@@ -48,52 +200,40 @@ function up_ui.show_dialog()
     renoise.app():show_warning("Open a song first.")
     return
   end
+  up_ui._song = song
+  up_ui._closed = false
+  up_ui._results = nil
+  up_ui._row_views = nil
+
   local vb = renoise.ViewBuilder()
-  local dry_box = vb:checkbox{ value = true }
-  local report_text = vb:multiline_text{
-    text = "Press 'Scan' to analyze the current song.",
-    width = 680,
-    height = 380,
+  up_ui._vb = vb
+
+  local status_text = vb:text{ text = "Opening..." }
+  local list_box = vb:column{ width = 880, spacing = 1 }
+  local upgrade_btn = vb:button{
+    text = "Upgrade",
+    active = false,
+    notifier = function() up_ui.do_upgrade() end,
   }
-  local function do_run(dry)
-    local ok, results = pcall(function() return up_core.run(song, dry) end)
-    if not ok then
-      report_text.text = "Error while running:\n" .. tostring(results)
-      renoise.app():show_status("Plugin Updater: error")
-      return
-    end
-    report_text.text = up_ui.format_report(results, dry)
-    local upgraded = 0
-    for _, r in ipairs(results) do
-      if r.status and r.status:find("^upgraded") then
-        upgraded = upgraded + 1
-      end
-    end
-    renoise.app():show_status(string.format(
-      "Plugin Updater: %d device(s) %s",
-      upgraded, dry and "would be upgraded" or "upgraded"))
-  end
+
   local content = vb:column{
     margin = 10,
     spacing = 8,
-    vb:row{ vb:text{ text = "Plugin Updater" } },
+    vb:row{ list_box },
     vb:row{
-      dry_box,
-      vb:text{ text = "Dry run (report only)" },
-      vb:button{ text = "Scan", notifier = function() do_run(dry_box.value) end },
-      vb:button{ text = "Run Upgrades", notifier = function() do_run(false) end },
-      vb:button{
-        text = "Close",
-        notifier = function()
-          if up_ui._dialog then
-            up_ui._dialog:close()
-          end
-        end,
-      },
+      width = 880,
+      status_text,
+      vb:space{},
+      upgrade_btn,
     },
-    vb:row{ report_text },
   }
+
+  up_ui._status_text = status_text
+  up_ui._list_box = list_box
+  up_ui._upgrade_btn = upgrade_btn
+
   up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
+  up_ui.start_scan()
 end
 
 return up_ui

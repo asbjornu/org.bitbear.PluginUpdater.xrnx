@@ -2,10 +2,13 @@ local up_util = require("up_util")
 
 local up_matching = {}
 
-function up_matching.build_track_pool(song)
+function up_matching.build_track_pool(song, yield_fn)
   local pool = {}
   local seen = {}
   for ti = 1, #song.tracks do
+    if yield_fn then
+      yield_fn()
+    end
     local track = song.tracks[ti]
     local ok, infos = pcall(function() return track.available_device_infos end)
     if ok and infos then
@@ -22,10 +25,13 @@ function up_matching.build_track_pool(song)
   return pool
 end
 
-function up_matching.build_instrument_pool(song)
+function up_matching.build_instrument_pool(song, yield_fn)
   local pool = {}
   local seen = {}
   for ii = 1, #song.instruments do
+    if yield_fn then
+      yield_fn()
+    end
     local ok, infos = pcall(function()
       return song.instruments[ii].plugin_properties.available_plugin_infos
     end)
@@ -61,6 +67,20 @@ function up_matching.find_candidate(pool, old_analysis)
     end
   end
   return best
+end
+
+function up_matching.find_candidates(pool, old_analysis)
+  if not old_analysis then
+    return {}
+  end
+  local list = {}
+  for _, c in ipairs(pool) do
+    if c.family_key == old_analysis.family_key and c.path ~= old_analysis.raw then
+      table.insert(list, c)
+    end
+  end
+  table.sort(list, function(a, b) return up_util.rank(a) > up_util.rank(b) end)
+  return list
 end
 
 return up_matching

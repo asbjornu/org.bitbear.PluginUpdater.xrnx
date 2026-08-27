@@ -41,9 +41,12 @@ local function inspect_track_device(track, track_index, dev_index)
   return rec
 end
 
-function up_inventory.scan(song)
+function up_inventory.scan(song, yield_fn)
   local entries = {}
   for ti = 1, #song.tracks do
+    if yield_fn then
+      yield_fn()
+    end
     local track = song.tracks[ti]
     local ok_devs, devs = pcall(function() return track.devices end)
     if ok_devs and devs then
@@ -57,6 +60,9 @@ function up_inventory.scan(song)
     end
   end
   for ii = 1, #song.instruments do
+    if yield_fn then
+      yield_fn()
+    end
     local inst = song.instruments[ii]
     local pp = inst.plugin_properties
     local ok_loaded, loaded = pcall(function() return pp.plugin_loaded end)
