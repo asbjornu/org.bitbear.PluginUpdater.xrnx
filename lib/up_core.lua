@@ -4,11 +4,32 @@ local up_swap = require("up_swap")
 
 local up_core = {}
 
-function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress)
-  local entries = up_inventory.scan(song, yield_fn, on_progress, on_found)
+function up_core.build_pools(song, yield_fn, on_progress, verbose)
   local inst_pool = up_matching.build_instrument_pool(song, yield_fn, on_progress)
   up_matching.debug_dump_device_infos(song)
   local track_pool = up_matching.build_track_pool(song, yield_fn, on_progress, inst_pool)
+  if verbose then
+    print(string.format("[PluginUpdater] track pool=%d inst pool=%d", #track_pool, #inst_pool))
+    for k, a in ipairs(track_pool) do
+      print(string.format("[PluginUpdater]   track_pool[%d] path=%q base=%q vendor=%q proto=%s",
+        k, a.path, a.base, a.vendor, tostring(a.protocol)))
+    end
+    for k, a in ipairs(inst_pool) do
+      print(string.format("[PluginUpdater]   inst_pool[%d] path=%q base=%q vendor=%q proto=%s",
+        k, a.path, a.base, a.vendor, tostring(a.protocol)))
+    end
+  end
+  return track_pool, inst_pool
+end
+
+function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress, pools)
+  local entries = up_inventory.scan(song, yield_fn, on_progress, on_found)
+  local track_pool, inst_pool
+  if pools then
+    track_pool, inst_pool = pools.track, pools.inst
+  else
+    track_pool, inst_pool = up_core.build_pools(song, yield_fn, on_progress, false)
+  end
   local results = {}
   local n = #entries
   for i, rec in ipairs(entries) do
@@ -20,14 +41,6 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress)
     end
     local pool = (rec.kind == "track") and track_pool or inst_pool
     local candidates = up_matching.find_candidates(pool, rec.analysis)
-    print(string.format(
-      "[PluginUpdater] entry %d/%d: kind=%s path=%q base=%q vendor=%q proto=%s -> %d candidate(s)",
-      i, n, rec.kind, tostring(rec.device_path), tostring(rec.analysis.base),
-      tostring(rec.analysis.vendor), tostring(rec.analysis.protocol), #candidates))
-    for k, c in ipairs(candidates) do
-      print(string.format("    [%d] %q (proto=%s base=%q vendor=%q)", k, c.path,
-        tostring(c.protocol), tostring(c.base), tostring(c.vendor)))
-    end
     local result = {
       entry = rec,
       candidates = candidates,
@@ -39,15 +52,6 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress)
     end
   end
   up_core._debug = { track = #track_pool, inst = #inst_pool }
-  print(string.format("[PluginUpdater] track pool=%d inst pool=%d", #track_pool, #inst_pool))
-  for k, a in ipairs(track_pool) do
-    print(string.format("[PluginUpdater]   track_pool[%d] path=%q base=%q vendor=%q proto=%s",
-      k, a.path, a.base, a.vendor, tostring(a.protocol)))
-  end
-  for k, a in ipairs(inst_pool) do
-    print(string.format("[PluginUpdater]   inst_pool[%d] path=%q base=%q vendor=%q proto=%s",
-      k, a.path, a.base, a.vendor, tostring(a.protocol)))
-  end
   return results
 end
 

@@ -1,6 +1,8 @@
 local up_core = require("up_core")
 local up_slicer = require("up_slicer")
 local up_util = require("up_util")
+local up_inventory = require("up_inventory")
+local up_matching = require("up_matching")
 
 local PLUGIN_ROWS_VISIBLE = 12
 local LIST_HEIGHT = 340
@@ -27,6 +29,21 @@ up_ui._scrollbar = nil
 up_ui._row_h = nil
 up_ui._header_h = nil
 up_ui._list_col = nil
+up_ui._pools = nil
+up_ui._saved_sel = nil
+up_ui._scanning = false
+up_ui._upgrading = false
+up_ui._dirty = false
+
+-- Stable identity for a scanned entry, used to preserve the user's dropdown
+-- choice across re-scans of the same song.
+local function entry_sig(rec)
+  if rec.kind == "instrument" then
+    return "inst|" .. tostring(rec.instrument_index) .. "|" .. tostring(rec.device_path)
+  end
+  return "track|" .. tostring(rec.track_index) .. "|"
+    .. tostring(rec.device_name) .. "|" .. tostring(rec.device_path)
+end
 
 local function old_label(rec)
   local proto = rec.analysis and rec.analysis.protocol
@@ -108,7 +125,7 @@ function up_ui.attach_device_observers()
   end
   up_ui._dn = {}
   for _, track in ipairs(song.tracks) do
-    local fn = function() up_ui.request_refresh() end
+    local fn = function() up_ui.reconcile() end
     pcall(function() track.devices_observable:add_notifier(fn) end)
     table.insert(up_ui._dn, { obs = track.devices_observable, fn = fn })
   end
@@ -133,24 +150,18 @@ function up_ui.attach_observers()
   up_ui.attach_device_observers()
 end
 
+-- A track/instrument was added or removed: re-read the song's devices and
+-- update the grid, reusing the cached candidate pool. Existing rows (and their
+-- selections) are preserved; a newly added device simply gains a new row.
 function up_ui.on_structure_changed()
   up_ui.attach_device_observers()
-  up_ui.request_refresh()
+  up_ui.reconcile()
 end
 
+-- A different song was loaded: rebuild everything from scratch, including the
+-- candidate pool (the only "complete refresh" we do).
 function up_ui.on_song_loaded()
   up_ui.attach_observers()
-  up_ui.request_refresh()
-end
-
-function up_ui.request_refresh()
-  if up_ui._closed then
-    return
-  end
-  if up_ui._scanning or up_ui._upgrading then
-    up_ui._dirty = true
-    return
-  end
   up_ui.start_scan()
 end
 
@@ -168,6 +179,21 @@ function up_ui.summary()
   return "Done. " .. table.concat(parts, "   ")
 end
 
+-- Snapshot the current dropdown choices, keyed by entry signature, so a
+-- re-scan of the same song can restore them.
+function up_ui.capture_selections()
+  local saved = {}
+  local views = up_ui._row_views or {}
+  local results = up_ui._results or {}
+  for i, rv in ipairs(views) do
+    local r = results[i]
+    if r and rv.popup and rv.candidates and #rv.candidates > 0 then
+      saved[entry_sig(r.entry)] = rv.popup.value
+    end
+  end
+  return saved
+end
+
 function up_ui.clear_list()
   local vb = up_ui._vb
   local list_box = up_ui._list_box
@@ -180,6 +206,7 @@ function up_ui.clear_list()
   up_ui._data_rows = {}
   up_ui._row_views = {}
   up_ui._scroll_first = 0
+  up_ui._fill_idx = 0
 
   local header = vb:row{
     spacing = 6,
@@ -327,7 +354,7 @@ local function auto_select_index(cands, entry)
   return best_i and (best_i + 1) or 1
 end
 
-function up_ui.fill_row(result)
+function up_ui.fill_row(result, preset_value)
   up_ui._fill_idx = (up_ui._fill_idx or 0) + 1
   local rv = up_ui._row_views[up_ui._fill_idx]
   if not rv then
@@ -340,12 +367,24 @@ function up_ui.fill_row(result)
     table.insert(items, up_util.format_plugin(c.name, c.protocol))
   end
   rv.popup.items = items
-  rv.popup.value = auto_select_index(cands, rec)
+  local v = preset_value or auto_select_index(cands, rec)
+  if not v or v < 1 or v > #items then
+    v = 1
+  end
+  rv.popup.value = v
   rv.popup.active = true
   rv.candidates = cands
+  rv._sig = entry_sig(rec)
+  -- Restore the user's previous choice for this entry, if any (same song).
+  if up_ui._saved_sel then
+    local sv = up_ui._saved_sel[rv._sig]
+    if sv and sv >= 1 and sv <= #items then
+      rv.popup.value = sv
+    end
+  end
 end
 
-function up_ui.start_scan()
+function up_ui.spawn_scan(full)
   up_ui.stop_scan()
   up_ui._scanning = true
   up_ui._dirty = false
@@ -354,9 +393,13 @@ function up_ui.start_scan()
     up_ui._upgrade_btn.active = false
   end
   if up_ui._status_text then
-    up_ui._status_text.text = "Scanning the song..."
+    up_ui._status_text.text = full and "Scanning the song..." or "Updating list..."
   end
+  up_ui._saved_sel = full and {} or up_ui.capture_selections()
   up_ui.clear_list()
+  if full then
+    up_ui._pools = nil
+  end
   local on_progress = function(phase, cur, total)
     if up_ui._status_text then
       up_ui._status_text.text = string.format("%s (%d/%d)...", phase, cur, total)
@@ -364,39 +407,79 @@ function up_ui.start_scan()
   end
   up_ui._scan_notifier = up_slicer.run(
     function()
-      local count = 0
-      up_ui._results = up_core.analyze(
-        song,
-        function() coroutine.yield() end,
-        function(rec)
-          up_ui.found_row(rec)
-        end,
-        function(result)
-          up_ui.fill_row(result)
-          count = count + 1
-          if up_ui._status_text then
-            up_ui._status_text.text = string.format("Found %d: %s", count, old_label(result.entry))
+      if full then
+        local tp, ip = up_core.build_pools(song, function() coroutine.yield() end, on_progress)
+        up_ui._pools = { track = tp, inst = ip }
+        up_ui._results = up_core.analyze(
+          song,
+          function() coroutine.yield() end,
+          function(rec)
+            up_ui.found_row(rec)
+          end,
+          function(result)
+            up_ui.fill_row(result)
+            if up_ui._status_text then
+              up_ui._status_text.text = string.format("Found %d: %s", #up_ui._results, old_label(result.entry))
+            end
+          end,
+          on_progress,
+          up_ui._pools)
+      else
+        -- Same-song reconcile: reuse the cached candidate pool so this stays
+        -- cheap; only re-read the song's current devices and re-match them.
+        local entries = up_inventory.scan(song, function() coroutine.yield() end, on_progress,
+          function(rec) up_ui.found_row(rec) end)
+        up_ui._results = {}
+        local n = #entries
+        for i, rec in ipairs(entries) do
+          if on_progress then
+            on_progress("Matching replacements", i, n)
           end
-        end,
-        on_progress)
+          coroutine.yield()
+          local pool = (rec.kind == "track") and up_ui._pools.track or up_ui._pools.inst
+          local cands = up_matching.find_candidates(pool, rec.analysis)
+          local result = { entry = rec, candidates = cands, candidate = cands[1] }
+          table.insert(up_ui._results, result)
+          up_ui.fill_row(result)
+        end
+      end
       coroutine.yield()
       if up_ui._status_text then
         up_ui._status_text.text = string.format(
-          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", count)
+          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #up_ui._results)
       end
       if up_ui._upgrade_btn then
         up_ui._upgrade_btn.active = true
       end
+      up_ui._saved_sel = nil
     end,
     function()
       up_ui._scanning = false
       up_ui._scan_notifier = nil
       if up_ui._dirty then
         up_ui._dirty = false
-        up_ui.start_scan()
+        up_ui.reconcile()
       end
     end,
     function() return up_ui._closed end)
+end
+
+function up_ui.start_scan()
+  up_ui.spawn_scan(true)
+end
+
+-- Update the grid for the same song without rebuilding the candidate pool.
+-- Existing selections are preserved; added/removed devices get/lose rows.
+function up_ui.reconcile()
+  if not up_ui._pools then
+    up_ui.start_scan()
+    return
+  end
+  if up_ui._scanning or up_ui._upgrading then
+    up_ui._dirty = true
+    return
+  end
+  up_ui.spawn_scan(false)
 end
 
 function up_ui.do_upgrade()
@@ -408,7 +491,7 @@ function up_ui.do_upgrade()
   if not up_ui._results then
     return
   end
-  local song = up_ui._song
+  local song = renoise.song()
   local selected = {}
   for i, r in ipairs(up_ui._results) do
     local rv = up_ui._row_views[i]
