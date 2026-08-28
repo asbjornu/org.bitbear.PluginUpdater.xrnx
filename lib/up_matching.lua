@@ -2,38 +2,85 @@ local up_util = require("up_util")
 
 local up_matching = {}
 
-local function track_infos(track)
-  -- Build the pool from available_device_infos. Each entry is a table with a
-  -- readable .name (e.g. "Effects: FabFilter Pro-Q 3") and an installable
-  -- .path (VST = readable name, VST3 = opaque UID, AU = 4-char code). The name
-  -- is the only reliable cross-protocol match key; the path is what we pass to
-  -- insert_device_at / load_plugin when swapping. Fall back to the plain
-  -- available_devices string list only if infos are unavailable.
-  local ok, infos = pcall(function() return track.available_device_infos end)
-  if ok and infos and #infos > 0 then
-    local out = {}
-    for _, info in ipairs(infos) do
-      local dp = info.path or info.device_path
-      local dn = info.name or info.device_name or info.short_name
-      if dp and not up_util.is_native_path(dp) then
-        out[#out + 1] = { device_path = dp, device_name = dn }
-      end
+local function safeget(obj, k)
+  local ok, v = pcall(function() return obj[k] end)
+  if not ok then return nil end
+  return v
+end
+
+local NAME_KEYS = { "name", "device_name", "display_name", "plugin_name", "product_name", "short_name" }
+
+local function track_name_of(info)
+  for _, k in ipairs(NAME_KEYS) do
+    local v = safeget(info, k)
+    if type(v) == "string" and v ~= "" then
+      return v
     end
-    if #out > 0 then
-      return out
+    if type(v) == "function" then
+      local ok, r = pcall(v, info)
+      if ok and type(r) == "string" and r ~= "" then
+        return r
+      end
     end
   end
-  local ok2, strs = pcall(function() return track.available_devices end)
-  if ok2 and strs and #strs > 0 then
-    local out = {}
-    for _, p in ipairs(strs) do
-      if not up_util.is_native_path(p) then
-        out[#out + 1] = { device_path = p, device_name = p }
+  return nil
+end
+
+local function track_infos(track)
+  -- available_devices  -> loadable full paths (VST = readable, VST3 = opaque UID,
+  --   AU = 4-char code). available_device_infos -> DeviceInfo objects, PARALLEL
+  --   to available_devices. Zip them so each pool entry keeps a loadable path AND
+  --   a readable name, which is the only reliable key for matching across
+  --   protocols (DeviceInfo.device_path is nil in this binding).
+  local okD, strs = pcall(function() return track.available_devices end)
+  local okI, infos = pcall(function() return track.available_device_infos end)
+  if not up_matching._dbg_track then
+    up_matching._dbg_track = true
+    print(string.format("[PluginUpdater] devices n=%s  infos n=%s",
+      (okD and strs) and tostring(#strs) or "ERR",
+      (okI and infos) and tostring(#infos) or "ERR"))
+    if okI and infos then
+      local funcs = {}
+      for i = 1, math.min(#infos, 4) do
+        local d = infos[i]
+        local parts = {}
+        for _, k in ipairs(NAME_KEYS) do
+          local v = safeget(d, k)
+          if type(v) == "string" then
+            parts[#parts + 1] = string.format("%s=%q", k, v)
+          elseif type(v) == "function" then
+            funcs[k] = true
+          end
+        end
+        print(string.format("    infos[%d] %s", i,
+          #parts > 0 and table.concat(parts, " ") or "(no string name field)"))
+      end
+      local fk = {}
+      for k in pairs(funcs) do fk[#fk + 1] = k end
+      if #fk > 0 then
+        print("[PluginUpdater] name fields present as methods: " .. table.concat(fk, ", "))
       end
     end
-    if #out > 0 then
-      return out
+    if okD and strs and okI and infos then
+      for i = 1, math.min(#strs, #infos) do
+        if type(strs[i]) == "string" and strs[i]:find("VST3") then
+          print(string.format("    align[%d] dev=%s -> name=%s",
+            i, strs[i], tostring(track_name_of(infos[i]))))
+          break
+        end
+      end
     end
+  end
+  if okD and strs and #strs > 0 then
+    local out = {}
+    for i, p in ipairs(strs) do
+      local nm
+      if okI and infos and infos[i] then
+        nm = track_name_of(infos[i])
+      end
+      out[#out + 1] = { device_path = p, device_name = nm }
+    end
+    return out
   end
   return nil
 end
