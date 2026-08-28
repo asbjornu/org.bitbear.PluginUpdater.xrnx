@@ -29,7 +29,8 @@ up_ui._header_h = nil
 up_ui._list_col = nil
 
 local function old_label(rec)
-  local plugin = rec.device_name
+  local proto = rec.analysis and rec.analysis.protocol
+  local plugin = up_util.format_plugin(rec.device_name, proto)
   local preset
   if rec.kind == "instrument" then
     preset = rec.instrument_name
@@ -38,7 +39,7 @@ local function old_label(rec)
   end
   if not plugin or plugin == "" then
     if rec.analysis then
-      plugin = rec.analysis.raw
+      plugin = up_util.format_plugin(rec.analysis.raw, proto)
     else
       plugin = preset
       preset = nil
@@ -235,7 +236,7 @@ function up_ui.fill_row(result)
   local cands = result.candidates or {}
   local items = { "Keep current (" .. old_label(rec) .. ")" }
   for _, c in ipairs(cands) do
-    table.insert(items, up_util.display_label(c.name, c.protocol))
+    table.insert(items, up_util.format_plugin(c.name, c.protocol))
   end
   rv.popup.items = items
   rv.popup.value = (#cands > 0 and 2 or 1)

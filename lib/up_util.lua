@@ -143,10 +143,12 @@ function up_util.rank(info)
   return up_util.protocol_rank(info.protocol) * 1000 + v
 end
 
--- Human-readable label for a candidate, preserving original case (unlike the
--- lowercased matching key). Strips a leading "Category:"/"Protocol:" tag and
--- appends the protocol, e.g. "FabFilter Pro-Q 3 (VST3)".
-function up_util.display_label(name, protocol)
+-- Unified human-readable name used for BOTH the "Current plugin" and
+-- "Replace with" columns. Emits the protocol moniker first, then the readable
+-- name with original case, e.g. "VST: Lennardigital Sylenth1" or
+-- "VST3: FabFilter Pro-Q 3". Strips a leading category/protocol tag (since we
+-- re-emit the protocol), drops architecture markers, and unifies separators.
+function up_util.format_plugin(name, protocol)
   local s = tostring(name or "")
   local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
   if tag then
@@ -155,9 +157,20 @@ function up_util.display_label(name, protocol)
       s = s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
     end
   end
-  s = s:match("^%s*(.-)%s*$")
+  s = s:gsub("%b()", " ")
+  s = s:gsub("[%._%:%-]+", " ")
+  local low = s:lower()
+  for _, tok in ipairs(ARCH_TOKENS) do
+    local st, en = low:find("%s*" .. tok .. "%s*")
+    while st do
+      s = s:sub(1, st - 1) .. " " .. s:sub(en + 1)
+      low = s:lower()
+      st, en = low:find("%s*" .. tok .. "%s*")
+    end
+  end
+  s = s:gsub("%s+", " "):match("^%s*(.-)%s*$")
   if protocol and protocol ~= "" then
-    return s .. " (" .. protocol .. ")"
+    return protocol:upper() .. ": " .. s
   end
   return s
 end
