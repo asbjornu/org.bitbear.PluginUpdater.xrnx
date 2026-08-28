@@ -136,6 +136,27 @@ function up_ui.attach_device_observers()
   end
 end
 
+-- Remove only the song-specific observers (used to silence the device-change
+-- notifications that an in-progress upgrade itself generates, so the grid is
+-- not rebuilt out from under the in-place "Current plugin" update).
+function up_ui.detach_device_observers()
+  local song = renoise.song()
+  if song then
+    pcall(function()
+      if up_ui._tn then song.tracks_observable:remove_notifier(up_ui._tn) end
+    end)
+    pcall(function()
+      if up_ui._in then song.instruments_observable:remove_notifier(up_ui._in) end
+    end)
+  end
+  if up_ui._dn then
+    for _, d in ipairs(up_ui._dn) do
+      pcall(function() d.obs:remove_notifier(d.fn) end)
+    end
+  end
+  up_ui._tn, up_ui._in, up_ui._dn = nil, nil, nil
+end
+
 function up_ui.ensure_doc_observers()
   if up_ui._doc_observers then return end
   up_ui._doc_observers = true
@@ -655,6 +676,10 @@ function up_ui.do_upgrade()
   end
   up_ui._status_text.text = string.format("Upgrading %d plugin(s)...", #selected)
 
+  -- Silence the device-change notifications our own swaps will generate, so the
+  -- grid isn't rebuilt (wiping the Result column) while we update rows in place.
+  up_ui.detach_device_observers()
+
   up_ui._upgrade_notifier = up_slicer.run(
     function()
       local n = #selected
@@ -712,6 +737,8 @@ function up_ui.do_upgrade()
       if up_ui._status_text then
         up_ui._status_text.text = (aborted and "Stopped. " or "") .. up_ui.summary()
       end
+      -- Restore device observers we detached for the duration of the upgrade.
+      up_ui.attach_observers()
     end,
     function() return up_ui._closed end)
 end
