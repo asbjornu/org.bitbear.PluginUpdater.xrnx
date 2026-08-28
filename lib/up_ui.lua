@@ -228,6 +228,27 @@ function up_ui.found_row(rec)
   end
 end
 
+-- Pick the auto-selected replacement: prefer a candidate on the same protocol
+-- as the entry, otherwise a higher-ranked protocol (a real upgrade). Never
+-- auto-switch to a *lower* protocol (e.g. don't move a VST3 instance onto AU).
+-- Returns the 1-based popup index, or 1 ("Keep current") when none qualify.
+local function auto_select_index(cands, entry)
+  local ep = entry.analysis and entry.analysis.protocol
+  local er = up_util.protocol_rank(ep)
+  local best_i, best_score
+  for i, c in ipairs(cands) do
+    local cr = up_util.protocol_rank(c.protocol)
+    if cr >= er then
+      local score = cr * 1000 + (c.version or 0)
+      if not best_score or score > best_score then
+        best_score = score
+        best_i = i
+      end
+    end
+  end
+  return best_i and (best_i + 1) or 1
+end
+
 function up_ui.fill_row(result)
   up_ui._fill_idx = (up_ui._fill_idx or 0) + 1
   local rv = up_ui._row_views[up_ui._fill_idx]
@@ -241,7 +262,7 @@ function up_ui.fill_row(result)
     table.insert(items, up_util.format_plugin(c.name, c.protocol))
   end
   rv.popup.items = items
-  rv.popup.value = (#cands > 0 and 2 or 1)
+  rv.popup.value = auto_select_index(cands, rec)
   rv.popup.active = true
   rv.candidates = cands
 end
