@@ -586,6 +586,13 @@ function up_ui.show_dialog()
   up_ui._results = nil
   up_ui._row_views = nil
 
+  if up_ui._idle_notifier then
+    pcall(function()
+      renoise.tool().app_idle_observable:remove_notifier(up_ui._idle_notifier)
+    end)
+    up_ui._idle_notifier = nil
+  end
+
   local vb = renoise.ViewBuilder()
   up_ui._vb = vb
 
@@ -638,11 +645,29 @@ function up_ui.show_dialog()
   up_ui._visible = PLUGIN_ROWS_VISIBLE
 
   up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
-  up_ui._dialog:add_close_notifier(function()
+
+  local function on_close()
     up_ui._closed = true
     up_ui.stop_all()
     up_ui.detach_observers()
-  end)
+  end
+
+  if up_ui._dialog.add_close_notifier then
+    up_ui._dialog:add_close_notifier(on_close)
+  else
+    local idle = function()
+      local still_open = pcall(function() return up_ui._dialog.content end)
+      if not still_open then
+        on_close()
+        if up_ui._idle_notifier then
+          renoise.tool().app_idle_observable:remove_notifier(up_ui._idle_notifier)
+          up_ui._idle_notifier = nil
+        end
+      end
+    end
+    up_ui._idle_notifier = idle
+    renoise.tool().app_idle_observable:add_notifier(idle)
+  end
   up_ui.attach_observers()
   up_ui.start_scan()
 end
