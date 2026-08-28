@@ -143,6 +143,48 @@ function up_util.rank(info)
   return up_util.protocol_rank(info.protocol) * 1000 + v
 end
 
+-- Given a preset/instrument name and the owning plugin's analysis, return the
+-- part of the preset that is NOT just a restatement of the plugin name. e.g.
+-- plugin product "lennardigital sylenth1" + preset "VST: Sylenth1 (ARP 303 Saw)"
+-- -> "ARP 303 Saw". Returns "" when the preset adds nothing new.
+function up_util.strip_redundant_prefix(preset, protocol, analysis)
+  local basetoks = {}
+  local base = (analysis and analysis.product) or ""
+  for w in base:gmatch("%S+") do
+    basetoks[w] = true
+  end
+  if not preset or preset == "" then
+    return ""
+  end
+  local s = tostring(preset)
+  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+  if tag then
+    local t = tag:lower()
+    if t == (protocol and protocol:lower()) or CATEGORY[t] then
+      s = s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    end
+  end
+  s = s:gsub("%b()", " ")
+  s = s:gsub("[%._%:%-]+", " ")
+  local low = s:lower()
+  for _, tok in ipairs(ARCH_TOKENS) do
+    local st, en = low:find("%s*" .. tok .. "%s*")
+    while st do
+      s = s:sub(1, st - 1) .. " " .. s:sub(en + 1)
+      low = s:lower()
+      st, en = low:find("%s*" .. tok .. "%s*")
+    end
+  end
+  while true do
+    local w = s:match("^%s*(%S+)")
+    if not w or not basetoks[w:lower()] then
+      break
+    end
+    s = s:gsub("^%s*%S+%s*", "", 1)
+  end
+  return s:gsub("%s+", " "):match("^%s*(.-)%s*$")
+end
+
 -- Unified human-readable name used for BOTH the "Current plugin" and
 -- "Replace with" columns. Emits the protocol moniker first, then the readable
 -- name with original case, e.g. "VST: Lennardigital Sylenth1" or

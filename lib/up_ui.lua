@@ -31,24 +31,26 @@ up_ui._list_col = nil
 local function old_label(rec)
   local proto = rec.analysis and rec.analysis.protocol
   local plugin = up_util.format_plugin(rec.device_name, proto)
+  if not plugin or plugin == "" then
+    if rec.analysis then
+      plugin = up_util.format_plugin(rec.analysis.raw, proto)
+    else
+      return "?"
+    end
+  end
   local preset
   if rec.kind == "instrument" then
     preset = rec.instrument_name
   elseif rec.active_preset then
     preset = rec.active_preset
   end
-  if not plugin or plugin == "" then
-    if rec.analysis then
-      plugin = up_util.format_plugin(rec.analysis.raw, proto)
-    else
-      plugin = preset
-      preset = nil
+  if preset and preset ~= "" then
+    local extra = up_util.strip_redundant_prefix(preset, proto, rec.analysis)
+    if extra and extra ~= "" then
+      return string.format("%s (%s)", plugin, extra)
     end
   end
-  if plugin and preset and preset ~= "" then
-    return string.format("%s  —  %s", plugin, preset)
-  end
-  return plugin or "?"
+  return plugin
 end
 
 function up_ui.stop_scan()
@@ -234,7 +236,7 @@ function up_ui.fill_row(result)
   end
   local rec = result.entry
   local cands = result.candidates or {}
-  local items = { "Keep current (" .. old_label(rec) .. ")" }
+  local items = { "Keep current: " .. old_label(rec) }
   for _, c in ipairs(cands) do
     table.insert(items, up_util.format_plugin(c.name, c.protocol))
   end
