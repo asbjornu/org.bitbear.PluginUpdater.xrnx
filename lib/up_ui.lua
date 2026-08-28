@@ -656,8 +656,8 @@ function up_ui.show_dialog()
     up_ui._dialog:add_close_notifier(on_close)
   else
     local idle = function()
-      local still_open = pcall(function() return up_ui._dialog.content end)
-      if not still_open then
+      local ok, vis = pcall(function() return up_ui._dialog.visible end)
+      if (ok and vis == false) or (not ok) then
         on_close()
         if up_ui._idle_notifier then
           renoise.tool().app_idle_observable:remove_notifier(up_ui._idle_notifier)
