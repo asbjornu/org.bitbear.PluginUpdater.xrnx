@@ -57,10 +57,33 @@ local function split_segments(s)
   return segs
 end
 
+-- Category prefixes that may appear at the start of a device name, e.g.
+-- "Effects: FabFilter Pro-Q 3" or "Generators: Sylenth1".
+local CATEGORY = { effects = true, generators = true, native = true, instruments = true }
+
+-- Strip a single leading "Tag:" prefix (protocol or category) so that names
+-- sourced from different APIs normalize the same way, e.g.
+--   "VST: FabFilter Pro-Q 3"  -> "FabFilter Pro-Q 3"
+--   "Effects: FabFilter Pro-Q 3" -> "FabFilter Pro-Q 3"
+-- A genuine mid-name colon (e.g. "Lennardigital: Sylenth1") is preserved.
+local function strip_leading_tag(s, protocol)
+  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+  if tag then
+    local t = tag:lower()
+    if t == (protocol and protocol:lower()) or CATEGORY[t] then
+      return s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    end
+  end
+  return s
+end
+
 -- Normalize a human-readable plugin name into a comparable lowercase token:
--- drop "(...)" annotations, any protocol token, and unify separators/spacing.
+-- drop "(...)" annotations, a leading category/protocol tag, any embedded
+-- protocol token, and unify separators/spacing. The version is intentionally
+-- kept so that different major versions do NOT collide (Pro-Q 2 != Pro-Q 3).
 local function clean_display_name(name, protocol)
   local s = tostring(name or ""):lower()
+  s = strip_leading_tag(s, protocol)
   s = s:gsub("%b()", " ")
   if protocol then
     s = s:gsub(protocol:lower(), " ")
@@ -89,9 +112,11 @@ function up_util.analyze_plugin(path, name)
     end
   end
 
-  local base = up_util.strip_version(product)
+  -- base keeps the version: this keeps major versions distinct (Pro-Q 2 vs
+  -- Pro-Q 3) while still matching the same plugin across VST/VST3/AU.
+  local base = product
   if base == "" then
-    base = product
+    base = (type(path) == "string" and path or "") or ""
   end
   local version = up_util.extract_version(product)
   return {
