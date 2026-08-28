@@ -410,13 +410,15 @@ function up_ui.spawn_scan(full)
       if full then
         local tp, ip = up_core.build_pools(song, function() coroutine.yield() end, on_progress)
         up_ui._pools = { track = tp, inst = ip }
-        up_ui._results = up_core.analyze(
+        up_ui._results = {}
+        up_core.analyze(
           song,
           function() coroutine.yield() end,
           function(rec)
             up_ui.found_row(rec)
           end,
           function(result)
+            table.insert(up_ui._results, result)
             up_ui.fill_row(result)
             if up_ui._status_text then
               up_ui._status_text.text = string.format("Found %d: %s", #up_ui._results, old_label(result.entry))
