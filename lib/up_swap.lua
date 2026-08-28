@@ -2,13 +2,66 @@ local up_preset = require("up_preset")
 
 local up_swap = {}
 
+-- Capture the old plugin's exposed parameter values so we can re-apply them to
+-- the replacement plugin as a best-effort "synthesized" preset when the native
+-- preset chunk can't be transferred (e.g. across plugin formats). Only
+-- automatable parameters are captured; internal/non-parameter state is skipped.
+local function snapshot_params(device)
+  local out = {}
+  if not device then return out end
+  local ok, params = pcall(function() return device.parameters end)
+  if not ok or not params then return out end
+  for i, p in ipairs(params) do
+    local okv, v = pcall(function() return p.value end)
+    if okv then
+      local okn, n = pcall(function() return p.name end)
+      local oka, auto = pcall(function() return p.is_automatable end)
+      out[#out + 1] = {
+        name = (okn and type(n) == "string") and n or "",
+        value = v,
+        is_automatable = (oka and auto) and true or false,
+      }
+    end
+  end
+  return out
+end
+
+-- Re-apply captured parameter values onto the new device, matched strictly by
+-- parameter name. Only automatable parameters are written. Returns the number
+-- of parameters that were transferred.
+local function apply_param_values(new_dev, old_params)
+  local ok_p, params = pcall(function() return new_dev.parameters end)
+  if not ok_p or not params then return 0 end
+  local by_name = {}
+  for i, p in ipairs(params) do
+    local okn, n = pcall(function() return p.name end)
+    if okn and type(n) == "string" and n ~= "" then
+      by_name[n] = i
+    end
+  end
+  local applied = 0
+  for _, op in ipairs(old_params) do
+    local idx = by_name[op.name]
+    if idx then
+      local np = params[idx]
+      local ok_set = pcall(function()
+        if np.is_automatable then np.value = op.value end
+      end)
+      if ok_set then applied = applied + 1 end
+    end
+  end
+  return applied
+end
+
 -- Try to move the old plugin's state onto the newly inserted device.
--- Returns ("parameters"|"name") on success, or (nil, reason) on failure.
--- A parameter-chunk transplant only works within the SAME plugin format, so
--- when the source and target protocols differ we skip it (the chunk is
--- inherently incompatible, e.g. VST<->VST3) and go straight to preset-name
--- matching; that keeps the upgrade and only loses the saved state.
-local function transfer_state(new_dev, old_data, old_preset_name, same_format)
+-- Returns ("parameters"|"name"|"params") on success, or (nil, reason) on
+-- failure. A parameter-chunk transplant only works within the SAME plugin
+-- format, so when the source and target protocols differ we skip it (the chunk
+-- is inherently incompatible, e.g. VST<->VST3) and go straight to preset-name
+-- matching; that keeps the upgrade and only loses the saved state. As a last
+-- resort we synthesize a preset from the old plugin's parameter values (matched
+-- by name), which recovers exposed parameters but not a full native preset.
+local function transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   print(string.format(
     "[PluginUpdater] transfer_state: old_data type=%s len=%s preset=%s same_format=%s",
     type(old_data),
@@ -40,10 +93,7 @@ local function transfer_state(new_dev, old_data, old_preset_name, same_format)
         end
       end
     end
-    return nil, errmsg or "transplant raised an error"
-  end
-
-  if old_preset_name then
+  elseif old_preset_name then
     local ok_p, presets = pcall(function() return new_dev.presets end)
     if ok_p and presets then
       for i, pname in ipairs(presets) do
@@ -56,6 +106,15 @@ local function transfer_state(new_dev, old_data, old_preset_name, same_format)
       end
     end
   end
+
+  -- Last resort: synthesize the preset from the old plugin's parameter values.
+  if old_params and #old_params > 0 then
+    local applied = apply_param_values(new_dev, old_params)
+    if applied > 0 then
+      return "params", tostring(applied)
+    end
+  end
+
   return nil, "no transfer method succeeded"
 end
 
@@ -68,6 +127,7 @@ function up_swap.swap_track_device(song, rec, candidate)
   if ok_pd then
     old_data = pd
   end
+  local old_params = snapshot_params(old_device)
   local old_preset_name = up_preset.extract_name(old_device)
   local was_broken = rec.broken
   local old_proto = rec.analysis and rec.analysis.protocol
@@ -84,11 +144,14 @@ function up_swap.swap_track_device(song, rec, candidate)
     }
   end
   local new_dev = dev_or_err
-  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format)
+  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   if method then
     pcall(function() track:delete_device_at(old_index + 1) end)
+    local status = method == "parameters" and "upgraded-with-parameters"
+      or method == "name" and "upgraded-name-matched-preset"
+      or "upgraded-parameter-synth"
     return {
-      status = method == "parameters" and "upgraded-with-parameters" or "upgraded-name-matched-preset",
+      status = status,
       new_path = candidate.path,
       method = method,
     }
@@ -108,12 +171,14 @@ function up_swap.swap_instrument(song, rec, candidate)
   local inst = song.instruments[rec.instrument_index]
   local pp = inst.plugin_properties
   local old_data = nil
+  local old_params = {}
   local old_preset_name = nil
   if rec.plugin_loaded and pp.plugin_device then
     local ok_pd, pd = pcall(function() return pp.plugin_device.active_preset_data end)
     if ok_pd then
       old_data = pd
     end
+    old_params = snapshot_params(pp.plugin_device)
     old_preset_name = up_preset.extract_name(pp.plugin_device)
   end
   local was_broken = rec.broken
@@ -140,10 +205,13 @@ function up_swap.swap_instrument(song, rec, candidate)
       detail = "new plugin device unavailable after load",
     }
   end
-  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format)
+  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   if method then
+    local status = method == "parameters" and "upgraded-with-parameters"
+      or method == "name" and "upgraded-name-matched-preset"
+      or "upgraded-parameter-synth"
     return {
-      status = method == "parameters" and "upgraded-with-parameters" or "upgraded-name-matched-preset",
+      status = status,
       new_path = candidate.path,
       method = method,
     }
