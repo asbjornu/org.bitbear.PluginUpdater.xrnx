@@ -129,6 +129,9 @@ function up_swap.swap_track_device(song, rec, candidate)
   end
   local old_params = snapshot_params(old_device)
   local old_preset_name = up_preset.extract_name(old_device)
+  local old_active = nil
+  local ok_act, act = pcall(function() return old_device.is_active end)
+  if ok_act then old_active = act end
   local was_broken = rec.broken
   local old_proto = rec.analysis and rec.analysis.protocol
   local same_format = (old_proto and old_proto == candidate.protocol)
@@ -144,6 +147,9 @@ function up_swap.swap_track_device(song, rec, candidate)
     }
   end
   local new_dev = dev_or_err
+  if old_active ~= nil then
+    pcall(function() new_dev.is_active = old_active end)
+  end
   local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   if method then
     pcall(function() track:delete_device_at(old_index + 1) end)
@@ -173,6 +179,7 @@ function up_swap.swap_instrument(song, rec, candidate)
   local old_data = nil
   local old_params = {}
   local old_preset_name = nil
+  local old_active = nil
   if rec.plugin_loaded and pp.plugin_device then
     local ok_pd, pd = pcall(function() return pp.plugin_device.active_preset_data end)
     if ok_pd then
@@ -180,6 +187,8 @@ function up_swap.swap_instrument(song, rec, candidate)
     end
     old_params = snapshot_params(pp.plugin_device)
     old_preset_name = up_preset.extract_name(pp.plugin_device)
+    local ok_act, act = pcall(function() return pp.plugin_device.is_active end)
+    if ok_act then old_active = act end
   end
   local was_broken = rec.broken
   local old_proto = rec.analysis and rec.analysis.protocol
@@ -195,6 +204,9 @@ function up_swap.swap_instrument(song, rec, candidate)
   end
   local ok_dev, adev = pcall(function() return pp.plugin_device end)
   local new_dev = (ok_dev and adev) or nil
+  if old_active ~= nil and new_dev then
+    pcall(function() new_dev.is_active = old_active end)
+  end
   if not new_dev then
     if rec.device_path then
       pcall(function() pp:load_plugin(rec.device_path) end)
