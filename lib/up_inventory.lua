@@ -157,7 +157,7 @@ function up_inventory.scan_instrument_device(inst)
   end
   local ii = nil
   for j, x in ipairs(song.instruments) do
-    if x == inst then
+    if rawequal(x, inst) then
       ii = j
       break
     end
