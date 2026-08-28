@@ -99,9 +99,6 @@ end
 -- upgrading, to avoid recursion and clobbering in-progress work.
 
 function up_ui.detach_observers()
-  pcall(function()
-    if up_ui._nl then renoise.tool().app_song_loaded_observable:remove_notifier(up_ui._nl) end
-  end)
   local song = renoise.song()
   if song then
     pcall(function() if up_ui._tn then song.tracks_observable:remove_notifier(up_ui._tn) end end)
@@ -131,12 +128,22 @@ function up_ui.attach_device_observers()
   end
 end
 
-function up_ui.attach_observers()
-  up_ui.detach_observers()
+function up_ui.ensure_doc_observers()
+  if up_ui._doc_observers then return end
+  up_ui._doc_observers = true
+  up_ui._release_nl = function() up_ui.on_song_releasing() end
+  up_ui._new_nl = function() up_ui.on_song_loaded() end
   pcall(function()
-    up_ui._nl = function() up_ui.on_song_loaded() end
-    renoise.tool().app_song_loaded_observable:add_notifier(up_ui._nl)
+    renoise.tool().app_release_document_observable:add_notifier(up_ui._release_nl)
   end)
+  pcall(function()
+    renoise.tool().app_new_document_observable:add_notifier(up_ui._new_nl)
+  end)
+end
+
+function up_ui.attach_observers()
+  up_ui.ensure_doc_observers()
+  up_ui.detach_observers()
   local song = renoise.song()
   if not song then return end
   pcall(function()
@@ -158,9 +165,19 @@ function up_ui.on_structure_changed()
   up_ui.reconcile()
 end
 
+-- The old song is about to be replaced: drop its observers so we don't leak
+-- notifiers on a song that's going away (renoise.song() still points to it
+-- here).
+function up_ui.on_song_releasing()
+  up_ui.detach_observers()
+end
+
 -- A different song was loaded: rebuild everything from scratch, including the
 -- candidate pool (the only "complete refresh" we do).
 function up_ui.on_song_loaded()
+  if not (up_ui._dialog and pcall(function() return up_ui._dialog.visible end)) then
+    return
+  end
   up_ui.attach_observers()
   up_ui.start_scan()
 end
