@@ -39,6 +39,59 @@ local function track_infos(track)
   return nil
 end
 
+-- Structural dump of a track's available_device_infos to discover which field
+-- carries the human-readable plugin name. Renoise DeviceInfo is opaque userdata,
+-- so we probe a candidate list of property getters and report type/value.
+local DEVICE_INFO_KEYS = {
+  "device_path", "device_name", "name", "path", "display_name",
+  "short_name", "plugin_name", "product_name", "vendor_name",
+  "type", "device_type", "is_plugin", "is_active", "active_preset",
+  "parameters", "presets",
+}
+
+local function dump_device_info(info, idx)
+  print(string.format("[PluginUpdater] device_info[%d] type=%s", idx, type(info)))
+  if type(info) ~= "userdata" and type(info) ~= "table" then
+    print(string.format("    value=%s", tostring(info)))
+    return
+  end
+  for _, key in ipairs(DEVICE_INFO_KEYS) do
+    local ok, v = pcall(function() return info[key] end)
+    if ok then
+      local t = type(v)
+      local desc
+      if t == "string" then
+        desc = string.format("%q", v)
+      elseif t == "userdata" or t == "table" then
+        desc = string.format("<%s len=%s>", t, tostring(#v))
+      elseif t == "boolean" then
+        desc = tostring(v)
+      else
+        desc = string.format("<%s> %s", t, tostring(v))
+      end
+      print(string.format("    .%s -> %s", key, desc))
+    end
+    local ok_m, v2 = pcall(function() return info[key .. "_observable"] end)
+    if ok_m and v2 ~= nil then
+      print(string.format("    .%s_observable -> present", key))
+    end
+  end
+end
+
+function up_matching.debug_dump_device_infos(song)
+  for ti = 1, #song.tracks do
+    local ok, infos = pcall(function() return song.tracks[ti].available_device_infos end)
+    if ok and infos and #infos > 0 then
+      print(string.format("[PluginUpdater] dumping available_device_infos for track %d (n=%d)", ti, #infos))
+      for i = 1, math.min(#infos, 6) do
+        dump_device_info(infos[i], i)
+      end
+      return
+    end
+  end
+  print("[PluginUpdater] no available_device_infos found on any track")
+end
+
 function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool)
   local pool = {}
   local seen = {}

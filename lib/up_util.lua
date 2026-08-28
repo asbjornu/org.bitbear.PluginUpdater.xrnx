@@ -57,29 +57,36 @@ local function split_segments(s)
   return segs
 end
 
-function up_util.analyze_plugin(path, fallback_name)
-  local raw = path and path or (fallback_name or "")
-  local protocol = up_util.detect_protocol(raw) or up_util.detect_protocol(fallback_name)
-
-  -- Derive the human-readable name from the path tail: drop the protocol folder
-  -- and the generic category folders (audio/effects/generators/native/plugin).
-  -- This yields a consistent vendor/product regardless of how the readable name
-  -- (device_name) is formatted, so an installed plugin matches its siblings.
-  local work = raw:lower()
+-- Normalize a human-readable plugin name into a comparable lowercase token:
+-- drop "(...)" annotations, any protocol token, and unify separators/spacing.
+local function clean_display_name(name, protocol)
+  local s = tostring(name or ""):lower()
+  s = s:gsub("%b()", " ")
   if protocol then
-    work = work:gsub(protocol:lower(), "", 1)
+    s = s:gsub(protocol:lower(), " ")
   end
-  local segs = split_segments(work)
+  s = s:gsub("[%._%-]+", " ")
+  s = s:gsub("%s+", " "):match("^%s*(.-)%s*$")
+  return s
+end
 
-  local vendor = ""
-  local product = ""
-  if #segs >= 2 then
-    product = segs[#segs]
-    vendor = table.concat(segs, " ", 1, #segs - 1)
-  elseif #segs == 1 then
-    product = segs[1]
-  else
-    product = (fallback_name or raw)
+function up_util.analyze_plugin(path, name)
+  local protocol = up_util.detect_protocol(path) or up_util.detect_protocol(name)
+
+  -- Prefer the human-readable display name (from DeviceInfo/PluginInfo or
+  -- device.name). This is the only reliable key for matching across protocols,
+  -- because VST3 paths are opaque UIDs and AU paths are 4-char codes. Fall back
+  -- to the last path segment only when no name is available.
+  local product = clean_display_name(name, protocol)
+  if product == "" then
+    local work = (type(path) == "string" and path or ""):lower()
+    if protocol then
+      work = work:gsub(protocol:lower(), "", 1)
+    end
+    local segs = split_segments(work)
+    if #segs >= 1 then
+      product = clean_display_name(segs[#segs], protocol)
+    end
   end
 
   local base = up_util.strip_version(product)
@@ -87,15 +94,14 @@ function up_util.analyze_plugin(path, fallback_name)
     base = product
   end
   local version = up_util.extract_version(product)
-  local family_key = (vendor ~= "" and vendor or "?"):lower() .. "::" .. base:lower()
   return {
-    raw = raw,
+    raw = path,
     protocol = protocol,
-    vendor = vendor,
+    vendor = "",
     product = product,
     base = base,
     version = version,
-    family_key = family_key,
+    family_key = base:lower(),
   }
 end
 
