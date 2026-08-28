@@ -4,10 +4,55 @@ local up_swap = require("up_swap")
 
 local up_core = {}
 
+-- The candidate pool depends only on the (session-global) set of installed
+-- plugins, not on the song. Building it (analyze_plugin per plugin) is the slow
+-- "gathering replacements" phase, so cache it and rebuild only when the plugin
+-- universe changes.
+local _pool_cache = nil
+
+local function pool_signature(song)
+  local parts = {}
+  pcall(function()
+    for ii = 1, #song.instruments do
+      local infos = song.instruments[ii].plugin_properties.available_plugin_infos
+      if infos then
+        for _, info in ipairs(infos) do
+          if info.path then parts[#parts + 1] = info.path end
+        end
+      end
+      if #parts > 0 then break end
+    end
+  end)
+  pcall(function()
+    for ti = 1, #song.tracks do
+      local devs = song.tracks[ti].available_devices
+      if devs then
+        for _, p in ipairs(devs) do
+          if type(p) == "string" then parts[#parts + 1] = p end
+        end
+      end
+      if #parts > 0 then break end
+    end
+  end)
+  table.sort(parts)
+  return table.concat(parts, "|")
+end
+
 function up_core.build_pools(song, yield_fn, on_progress, verbose)
+  local sig = pool_signature(song)
+  if _pool_cache and _pool_cache.sig == sig then
+    if verbose then
+      print(string.format("[PluginUpdater] reusing cached plugin pool (track=%d inst=%d)",
+        #_pool_cache.track, #_pool_cache.inst))
+    end
+    return _pool_cache.track, _pool_cache.inst
+  end
   local inst_pool = up_matching.build_instrument_pool(song, yield_fn, on_progress)
   up_matching.debug_dump_device_infos(song)
   local track_pool = up_matching.build_track_pool(song, yield_fn, on_progress, inst_pool)
+  if sig ~= "" then
+    _pool_cache = { sig = sig, track = track_pool, inst = inst_pool }
+  end
   if verbose then
     print(string.format("[PluginUpdater] track pool=%d inst pool=%d", #track_pool, #inst_pool))
     for k, a in ipairs(track_pool) do
@@ -20,6 +65,10 @@ function up_core.build_pools(song, yield_fn, on_progress, verbose)
     end
   end
   return track_pool, inst_pool
+end
+
+function up_core.invalidate_pool_cache()
+  _pool_cache = nil
 end
 
 function up_core.match_entries(entries, pools, yield_fn, on_progress, on_entry)
