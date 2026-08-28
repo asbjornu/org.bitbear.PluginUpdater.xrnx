@@ -2,18 +2,45 @@ local up_preset = require("up_preset")
 
 local up_swap = {}
 
+-- Try to move the old plugin's state onto the newly inserted device.
+-- Returns ("parameters"|"name") on success, or (nil, reason) on failure.
+-- When a parameter-chunk transplant fails (common for cross-protocol swaps,
+-- where VST<->VST3 chunks are incompatible) we fall through to preset-name
+-- matching before giving up, so we keep as much as possible.
 local function transfer_state(new_dev, old_data, old_preset_name)
+  print(string.format(
+    "[PluginUpdater] transfer_state: old_data type=%s len=%s preset=%s",
+    type(old_data),
+    (type(old_data) == "string") and tostring(#old_data) or "-",
+    tostring(old_preset_name)))
+
   if old_data and old_data ~= "" then
-    local ok = pcall(function() new_dev.active_preset_data = old_data end)
+    local ok, errmsg = pcall(function() new_dev.active_preset_data = old_data end)
     if ok then
       local ok2, got = pcall(function() return new_dev.active_preset_data end)
       if ok2 and got and got ~= "" then
         return "parameters"
       end
-      return nil, "transplant resulted in empty/default state"
+      errmsg = "transplant resulted in empty/default state"
+    else
+      print(string.format("[PluginUpdater]   active_preset_data assignment failed: %s",
+        tostring(errmsg)))
     end
-    return nil, "transplant raised an error"
+    -- fall through to preset-name matching
+    local ok_p, presets = pcall(function() return new_dev.presets end)
+    if ok_p and presets then
+      for i, pname in ipairs(presets) do
+        if pname == old_preset_name then
+          local ok_set = pcall(function() new_dev.active_preset = i end)
+          if ok_set then
+            return "name"
+          end
+        end
+      end
+    end
+    return nil, errmsg or "transplant raised an error"
   end
+
   if old_preset_name then
     local ok_p, presets = pcall(function() return new_dev.presets end)
     if ok_p and presets then
@@ -62,19 +89,14 @@ function up_swap.swap_track_device(song, rec, candidate)
       method = method,
     }
   end
-  if was_broken then
-    pcall(function() track:delete_device_at(old_index + 1) end)
-    return {
-      status = "upgraded-replaced-broken",
-      new_path = candidate.path,
-      detail = "old device was broken; new plugin loaded at default state (set preset manually)",
-    }
-  end
-  pcall(function() track:delete_device_at(old_index) end)
+  -- The new plugin is inserted and valid. The upgrade (protocol change) still
+  -- happens; only the old state couldn't be carried over. Remove the old device
+  -- and keep the new one at default state rather than silently reverting.
+  pcall(function() track:delete_device_at(old_index + 1) end)
   return {
-    status = "skipped-transfer-rejected",
+    status = "upgraded-default",
     new_path = candidate.path,
-    detail = err,
+    detail = (was_broken and "old plugin was broken; " or "preset not transferred: ") .. tostring(err),
   }
 end
 
@@ -120,22 +142,12 @@ function up_swap.swap_instrument(song, rec, candidate)
       method = method,
     }
   end
-  if was_broken then
-    return {
-      status = "upgraded-replaced-broken",
-      new_path = candidate.path,
-      detail = "old plugin was broken; new loaded at default state (set preset manually)",
-    }
-  end
-  if rec.device_path then
-    pcall(function() pp:load_plugin(rec.device_path) end)
-  else
-    pcall(function() pp:load_plugin("") end)
-  end
+  -- load_plugin already replaced the instrument plugin in place, so the upgrade
+  -- is effective; only the old state couldn't be carried over.
   return {
-    status = "skipped-transfer-rejected",
+    status = "upgraded-default",
     new_path = candidate.path,
-    detail = err,
+    detail = (was_broken and "old plugin was broken; " or "preset not transferred: ") .. tostring(err),
   }
 end
 

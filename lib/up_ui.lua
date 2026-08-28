@@ -331,8 +331,18 @@ function up_ui.do_upgrade()
       end
     end
   end
+
+  -- Disable all row controls up front; re-enabled when the run finishes.
+  if up_ui._row_views then
+    for _, rv in ipairs(up_ui._row_views) do
+      if rv.popup then rv.popup.active = false end
+    end
+  end
+
   if #selected == 0 then
-    up_ui._status_text.text = "No replacements selected."
+    if up_ui._upgrade_btn then up_ui._upgrade_btn.active = true end
+    if up_ui._status_text then up_ui._status_text.text = "No replacements selected." end
+    up_ui.recompute_visible()
     return
   end
 
@@ -343,7 +353,8 @@ function up_ui.do_upgrade()
 
   up_ui._upgrade_notifier = up_slicer.run(
     function()
-      for _, s in ipairs(selected) do
+      local n = #selected
+      for i, s in ipairs(selected) do
         local res = up_core.apply_one(song, s.result, s.chosen)
         s.result.status = res.status
         s.result.detail = res.detail
@@ -351,12 +362,23 @@ function up_ui.do_upgrade()
           s.rv.result_txt.text = (res.status or "")
             .. (res.detail and (" - " .. res.detail) or "")
         end
+        if up_ui._status_text then
+          up_ui._status_text.text = string.format(
+            "Upgrading %d/%d: %s", i, n, old_label(s.result.entry))
+        end
         coroutine.yield()
       end
     end,
     function()
-      up_ui._upgrade_btn.active = true
-      up_ui._status_text.text = up_ui.summary()
+      if up_ui._row_views then
+        for _, rv in ipairs(up_ui._row_views) do
+          if rv.popup and rv.candidates and #rv.candidates > 0 then
+            rv.popup.active = true
+          end
+        end
+      end
+      if up_ui._upgrade_btn then up_ui._upgrade_btn.active = true end
+      if up_ui._status_text then up_ui._status_text.text = up_ui.summary() end
       up_ui._upgrade_notifier = nil
     end,
     function() return up_ui._closed end)
