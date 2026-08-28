@@ -76,6 +76,84 @@ function up_ui.stop_all()
   up_ui.stop_upgrade()
 end
 
+-- Live refresh: re-scan when a new song loads or devices/tracks/instruments
+-- change, so the grid stays in sync (a newly added device becomes a new row).
+-- Refresh is coalesced and suppressed while we are ourselves scanning or
+-- upgrading, to avoid recursion and clobbering in-progress work.
+
+function up_ui.detach_observers()
+  pcall(function()
+    if up_ui._nl then renoise.tool().app_song_loaded_observable:remove_notifier(up_ui._nl) end
+  end)
+  local song = renoise.song()
+  if song then
+    pcall(function() if up_ui._tn then song.tracks_observable:remove_notifier(up_ui._tn) end end)
+    pcall(function() if up_ui._in then song.instruments_observable:remove_notifier(up_ui._in) end end)
+    if up_ui._dn then
+      for _, d in ipairs(up_ui._dn) do
+        pcall(function() d.obs:remove_notifier(d.fn) end)
+      end
+    end
+  end
+  up_ui._nl, up_ui._tn, up_ui._in, up_ui._dn = nil, nil, nil, nil
+end
+
+function up_ui.attach_device_observers()
+  local song = renoise.song()
+  if not song then return end
+  if up_ui._dn then
+    for _, d in ipairs(up_ui._dn) do
+      pcall(function() d.obs:remove_notifier(d.fn) end)
+    end
+  end
+  up_ui._dn = {}
+  for _, track in ipairs(song.tracks) do
+    local fn = function() up_ui.request_refresh() end
+    pcall(function() track.devices_observable:add_notifier(fn) end)
+    table.insert(up_ui._dn, { obs = track.devices_observable, fn = fn })
+  end
+end
+
+function up_ui.attach_observers()
+  up_ui.detach_observers()
+  pcall(function()
+    up_ui._nl = function() up_ui.on_song_loaded() end
+    renoise.tool().app_song_loaded_observable:add_notifier(up_ui._nl)
+  end)
+  local song = renoise.song()
+  if not song then return end
+  pcall(function()
+    up_ui._tn = function() up_ui.on_structure_changed() end
+    song.tracks_observable:add_notifier(up_ui._tn)
+  end)
+  pcall(function()
+    up_ui._in = function() up_ui.on_structure_changed() end
+    song.instruments_observable:add_notifier(up_ui._in)
+  end)
+  up_ui.attach_device_observers()
+end
+
+function up_ui.on_structure_changed()
+  up_ui.attach_device_observers()
+  up_ui.request_refresh()
+end
+
+function up_ui.on_song_loaded()
+  up_ui.attach_observers()
+  up_ui.request_refresh()
+end
+
+function up_ui.request_refresh()
+  if up_ui._closed then
+    return
+  end
+  if up_ui._scanning or up_ui._upgrading then
+    up_ui._dirty = true
+    return
+  end
+  up_ui.start_scan()
+end
+
 function up_ui.summary()
   local results = up_ui._results or {}
   local counts = {}
@@ -269,7 +347,9 @@ end
 
 function up_ui.start_scan()
   up_ui.stop_scan()
-  local song = up_ui._song
+  up_ui._scanning = true
+  up_ui._dirty = false
+  local song = renoise.song()
   if up_ui._upgrade_btn then
     up_ui._upgrade_btn.active = false
   end
@@ -308,7 +388,14 @@ function up_ui.start_scan()
         up_ui._upgrade_btn.active = true
       end
     end,
-    nil,
+    function()
+      up_ui._scanning = false
+      up_ui._scan_notifier = nil
+      if up_ui._dirty then
+        up_ui._dirty = false
+        up_ui.start_scan()
+      end
+    end,
     function() return up_ui._closed end)
 end
 
@@ -385,6 +472,7 @@ function up_ui.do_upgrade()
       local aborted = up_ui._abort
       up_ui._upgrading = false
       up_ui._abort = false
+      up_ui._dirty = false
       if up_ui._row_views then
         for _, rv in ipairs(up_ui._row_views) do
           if rv.popup and rv.candidates and #rv.candidates > 0 then
@@ -467,6 +555,12 @@ function up_ui.show_dialog()
   up_ui._visible = PLUGIN_ROWS_VISIBLE
 
   up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
+  up_ui._dialog:add_close_notifier(function()
+    up_ui._closed = true
+    up_ui.stop_all()
+    up_ui.detach_observers()
+  end)
+  up_ui.attach_observers()
   up_ui.start_scan()
 end
 
