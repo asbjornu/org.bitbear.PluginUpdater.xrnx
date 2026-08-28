@@ -478,6 +478,14 @@ function up_ui.spawn_scan(full)
       if up_ui._dirty then
         up_ui._dirty = false
         up_ui.reconcile()
+      elseif up_ui._post_upgrade_summary then
+        if up_ui._status_text then
+          up_ui._status_text.text = up_ui._post_upgrade_summary
+        end
+        if up_ui._upgrade_btn then
+          up_ui._upgrade_btn.active = true
+        end
+        up_ui._post_upgrade_summary = nil
       end
     end,
     function() return up_ui._closed end)
@@ -586,10 +594,17 @@ function up_ui.do_upgrade()
         up_ui._upgrade_btn.text = "Upgrade"
         up_ui._upgrade_btn.active = true
       end
-      if up_ui._status_text then
+      up_ui._upgrade_notifier = nil
+      -- Refresh the grid so each row's "Current plugin" reflects the new,
+      -- post-upgrade device state. Show the upgrade summary once refreshed.
+      local can_refresh = up_ui._dialog
+        and pcall(function() return up_ui._dialog.visible end)
+      if can_refresh then
+        up_ui._post_upgrade_summary = (aborted and "Stopped. " or "") .. up_ui.summary()
+        up_ui.reconcile()
+      elseif up_ui._status_text then
         up_ui._status_text.text = (aborted and "Stopped. " or "") .. up_ui.summary()
       end
-      up_ui._upgrade_notifier = nil
     end,
     function() return up_ui._closed end)
 end
@@ -604,6 +619,7 @@ function up_ui.show_dialog()
   up_ui._closed = false
   up_ui._results = nil
   up_ui._row_views = nil
+  up_ui._post_upgrade_summary = nil
 
   if up_ui._idle_notifier then
     pcall(function()
