@@ -350,11 +350,28 @@ function up_ui.found_row(rec)
     old_tf, popup, result_txt,
   }
   table.insert(up_ui._data_rows, row)
-  table.insert(up_ui._row_views, { popup = popup, candidates = {}, result_txt = result_txt })
+  table.insert(up_ui._row_views, { popup = popup, candidates = {}, result_txt = result_txt, old_tf = old_tf })
   up_ui.refresh_scroll()
   if not up_ui._row_h and row.height and row.height > 0 then
     up_ui._row_h = row.height
     up_ui.recompute_visible()
+  end
+end
+
+-- Re-read a single device after an upgrade so we can refresh its "Current
+-- plugin" label. The device stays at the same index, so the original rec's
+-- indices still point at it.
+function up_ui.reinspect_entry(rec)
+  local song = renoise.song()
+  if not song then return nil end
+  if rec.kind == "track" then
+    local track = song.tracks[rec.track_index]
+    if not track then return nil end
+    return up_inventory.scan_track_device(rec.track_index, track, rec.device_index)
+  else
+    local inst = song.instruments[rec.instrument_index]
+    if not inst then return nil end
+    return up_inventory.scan_instrument_device(inst)
   end
 end
 
@@ -477,14 +494,6 @@ function up_ui.spawn_scan(full)
         if up_ui._dirty then
           up_ui._dirty = false
           up_ui.reconcile()
-        elseif up_ui._post_upgrade_summary then
-          if up_ui._status_text then
-            up_ui._status_text.text = up_ui._post_upgrade_summary
-          end
-          if up_ui._upgrade_btn then
-            up_ui._upgrade_btn.active = true
-          end
-          up_ui._post_upgrade_summary = nil
         end
       end
     end
@@ -574,14 +583,6 @@ function up_ui.spawn_scan(full)
         if up_ui._dirty then
           up_ui._dirty = false
           up_ui.reconcile()
-        elseif up_ui._post_upgrade_summary then
-          if up_ui._status_text then
-            up_ui._status_text.text = up_ui._post_upgrade_summary
-          end
-          if up_ui._upgrade_btn then
-            up_ui._upgrade_btn.active = true
-          end
-          up_ui._post_upgrade_summary = nil
         end
       end,
       function() return up_ui._closed end)
@@ -692,14 +693,23 @@ function up_ui.do_upgrade()
         up_ui._upgrade_btn.active = true
       end
       up_ui._upgrade_notifier = nil
-      -- Refresh the grid so each row's "Current plugin" reflects the new,
-      -- post-upgrade device state. Show the upgrade summary once refreshed.
+      -- Update each upgraded row's "Current plugin" in place; keep the
+      -- "Replace with" dropdown and the "Result" text untouched.
       local can_refresh = up_ui._dialog
         and pcall(function() return up_ui._dialog.visible end)
       if can_refresh then
-        up_ui._post_upgrade_summary = (aborted and "Stopped. " or "") .. up_ui.summary()
-        up_ui.reconcile()
-      elseif up_ui._status_text then
+        for _, s in ipairs(selected) do
+          local status = s.result.status or ""
+          if string.sub(status, 1, 8) == "upgraded" and s.rv and s.rv.old_tf then
+            local new_rec = up_ui.reinspect_entry(s.result.entry)
+            if new_rec then
+              s.rv.old_tf.text = old_label(new_rec)
+              s.result.entry = new_rec
+            end
+          end
+        end
+      end
+      if up_ui._status_text then
         up_ui._status_text.text = (aborted and "Stopped. " or "") .. up_ui.summary()
       end
     end,
@@ -716,7 +726,6 @@ function up_ui.show_dialog()
   up_ui._closed = false
   up_ui._results = nil
   up_ui._row_views = nil
-  up_ui._post_upgrade_summary = nil
   up_ui._scan_pending = nil
   up_ui._scan_notifiers = nil
   up_ui._scan_entries = nil
