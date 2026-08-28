@@ -1,5 +1,6 @@
 local up_core = require("up_core")
 local up_slicer = require("up_slicer")
+local up_util = require("up_util")
 
 local PLUGIN_ROWS_VISIBLE = 12
 local LIST_HEIGHT = 340
@@ -234,7 +235,7 @@ function up_ui.fill_row(result)
   local cands = result.candidates or {}
   local items = { "Keep current (" .. old_label(rec) .. ")" }
   for _, c in ipairs(cands) do
-    table.insert(items, c.path or c.raw)
+    table.insert(items, up_util.display_label(c.name, c.protocol))
   end
   rv.popup.items = items
   rv.popup.value = (#cands > 0 and 2 or 1)

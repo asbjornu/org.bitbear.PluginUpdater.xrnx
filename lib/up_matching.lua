@@ -124,6 +124,7 @@ function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool
         seen[dp] = true
         local a = up_util.analyze_plugin(dp, dn)
         a.path = dp
+        a.name = dn
         table.insert(pool, a)
       end
       if yield_fn and (j % 50 == 0) then
@@ -176,6 +177,7 @@ function up_matching.build_instrument_pool(song, yield_fn, on_progress)
         seen[p] = true
         local a = up_util.analyze_plugin(p, info.name)
         a.path = p
+        a.name = info.name
         table.insert(pool, a)
       end
       if yield_fn and (j % 50 == 0) then
