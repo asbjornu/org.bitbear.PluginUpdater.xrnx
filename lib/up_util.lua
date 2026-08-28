@@ -77,10 +77,15 @@ local function strip_leading_tag(s, protocol)
   return s
 end
 
+-- Architecture/marker tokens that are pure metadata and must not participate
+-- in cross-protocol matching, e.g. "ValhallaRoom_x64" vs "ValhallaRoom".
+local ARCH_TOKENS = { "x64", "x86", "win64", "win32", "aax", "vst3", "vst2", "au" }
+
 -- Normalize a human-readable plugin name into a comparable lowercase token:
 -- drop "(...)" annotations, a leading category/protocol tag, any embedded
--- protocol token, and unify separators/spacing. The version is intentionally
--- kept so that different major versions do NOT collide (Pro-Q 2 != Pro-Q 3).
+-- protocol token, architecture markers, and unify separators/spacing. The
+-- version is intentionally kept so that different major versions do NOT collide
+-- (Pro-Q 2 != Pro-Q 3).
 local function clean_display_name(name, protocol)
   local s = tostring(name or ""):lower()
   s = strip_leading_tag(s, protocol)
@@ -89,6 +94,9 @@ local function clean_display_name(name, protocol)
     s = s:gsub(protocol:lower(), " ")
   end
   s = s:gsub("[%._%-]+", " ")
+  for _, tok in ipairs(ARCH_TOKENS) do
+    s = s:gsub("%s*" .. tok .. "%s*", " ")
+  end
   s = s:gsub("%s+", " "):match("^%s*(.-)%s*$")
   return s
 end
