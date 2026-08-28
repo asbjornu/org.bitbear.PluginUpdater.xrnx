@@ -652,7 +652,7 @@ function up_ui.show_dialog()
     up_ui.detach_observers()
   end
 
-  if up_ui._dialog.add_close_notifier then
+  if pcall(function() return up_ui._dialog.add_close_notifier end) then
     up_ui._dialog:add_close_notifier(on_close)
   else
     local idle = function()
