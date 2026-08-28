@@ -313,6 +313,11 @@ function up_ui.start_scan()
 end
 
 function up_ui.do_upgrade()
+  -- While an upgrade is running, the button acts as "Stop".
+  if up_ui._upgrading then
+    up_ui._abort = true
+    return
+  end
   if not up_ui._results then
     return
   end
@@ -347,14 +352,21 @@ function up_ui.do_upgrade()
   end
 
   up_ui.stop_scan()
-  up_ui.stop_upgrade()
-  up_ui._upgrade_btn.active = false
+  up_ui._upgrading = true
+  up_ui._abort = false
+  if up_ui._upgrade_btn then
+    up_ui._upgrade_btn.text = "Stop"
+    up_ui._upgrade_btn.active = true
+  end
   up_ui._status_text.text = string.format("Upgrading %d plugin(s)...", #selected)
 
   up_ui._upgrade_notifier = up_slicer.run(
     function()
       local n = #selected
       for i, s in ipairs(selected) do
+        if up_ui._abort then
+          break
+        end
         local res = up_core.apply_one(song, s.result, s.chosen)
         s.result.status = res.status
         s.result.detail = res.detail
@@ -370,6 +382,9 @@ function up_ui.do_upgrade()
       end
     end,
     function()
+      local aborted = up_ui._abort
+      up_ui._upgrading = false
+      up_ui._abort = false
       if up_ui._row_views then
         for _, rv in ipairs(up_ui._row_views) do
           if rv.popup and rv.candidates and #rv.candidates > 0 then
@@ -377,8 +392,13 @@ function up_ui.do_upgrade()
           end
         end
       end
-      if up_ui._upgrade_btn then up_ui._upgrade_btn.active = true end
-      if up_ui._status_text then up_ui._status_text.text = up_ui.summary() end
+      if up_ui._upgrade_btn then
+        up_ui._upgrade_btn.text = "Upgrade"
+        up_ui._upgrade_btn.active = true
+      end
+      if up_ui._status_text then
+        up_ui._status_text.text = (aborted and "Stopped. " or "") .. up_ui.summary()
+      end
       up_ui._upgrade_notifier = nil
     end,
     function() return up_ui._closed end)
