@@ -71,6 +71,14 @@ local function old_label(rec)
 end
 
 function up_ui.stop_scan()
+  if up_ui._scan_notifiers then
+    for _, n in ipairs(up_ui._scan_notifiers) do
+      pcall(function()
+        renoise.tool().app_idle_observable:remove_notifier(n)
+      end)
+    end
+    up_ui._scan_notifiers = nil
+  end
   if up_ui._scan_notifier then
     pcall(function()
       renoise.tool().app_idle_observable:remove_notifier(up_ui._scan_notifier)
@@ -422,30 +430,119 @@ function up_ui.spawn_scan(full)
       up_ui._status_text.text = string.format("%s (%d/%d)...", phase, cur, total)
     end
   end
-  up_ui._scan_notifier = up_slicer.run(
-    function()
-      if full then
-        local tp, ip = up_core.build_pools(song, function() coroutine.yield() end, on_progress)
-        up_ui._pools = { track = tp, inst = ip }
-        up_ui._results = {}
-        up_core.analyze(
-          song,
-          function() coroutine.yield() end,
-          function(rec)
+
+  if full then
+    -- Overlap the two independent, order-independent phases:
+    --   * scanning the song's devices (so rows appear immediately), and
+    --   * building the candidate pool ("gathering replacements", the slow part).
+    -- Once both are done we match + fill the rows.
+    up_ui._scan_entries = {}
+    up_ui._scan_done = false
+    up_ui._pool_done = false
+    up_ui._results = {}
+
+    local yield = function() coroutine.yield() end
+
+    local function finalize_match()
+      if not (up_ui._scan_done and up_ui._pool_done) then
+        return
+      end
+      up_ui._results = up_core.match_entries(
+        up_ui._scan_entries, up_ui._pools, yield, on_progress,
+        function(result)
+          up_ui.fill_row(result)
+          if up_ui._status_text then
+            up_ui._status_text.text = string.format("Found %d: %s", #up_ui._results, old_label(result.entry))
+          end
+        end)
+      if up_ui._status_text then
+        up_ui._status_text.text = string.format(
+          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #up_ui._results)
+      end
+      if up_ui._upgrade_btn then
+        up_ui._upgrade_btn.active = true
+      end
+      up_ui._saved_sel = nil
+    end
+
+    -- Shared completion bookkeeping, run when the last concurrent task ends.
+    up_ui._scan_pending = 3
+    local function task_done()
+      up_ui._scan_pending = up_ui._scan_pending - 1
+      if up_ui._scan_pending <= 0 then
+        up_ui._scan_pending = nil
+        up_ui._scan_notifiers = nil
+        up_ui._scan_notifier = nil
+        up_ui._scanning = false
+        if up_ui._dirty then
+          up_ui._dirty = false
+          up_ui.reconcile()
+        elseif up_ui._post_upgrade_summary then
+          if up_ui._status_text then
+            up_ui._status_text.text = up_ui._post_upgrade_summary
+          end
+          if up_ui._upgrade_btn then
+            up_ui._upgrade_btn.active = true
+          end
+          up_ui._post_upgrade_summary = nil
+        end
+      end
+    end
+
+    -- Task A: scan the song's devices (rows appear immediately).
+    local na = up_slicer.run(
+      function()
+        local ok, err = pcall(function()
+          up_inventory.scan(song, yield, on_progress, function(rec)
+            table.insert(up_ui._scan_entries, rec)
             up_ui.found_row(rec)
-          end,
-          function(result)
-            table.insert(up_ui._results, result)
-            up_ui.fill_row(result)
-            if up_ui._status_text then
-              up_ui._status_text.text = string.format("Found %d: %s", #up_ui._results, old_label(result.entry))
-            end
-          end,
-          on_progress,
-          up_ui._pools)
-      else
-        -- Same-song reconcile: reuse the cached candidate pool so this stays
-        -- cheap; only re-read the song's current devices and re-match them.
+          end)
+        end)
+        if not ok then
+          renoise.app():show_warning("Plugin Updater error (scan):\n" .. tostring(err))
+        end
+        up_ui._scan_done = true
+      end,
+      task_done,
+      function() return up_ui._closed end)
+
+    -- Task B: build the candidate pool (the long "gathering replacements" phase).
+    local nb = up_slicer.run(
+      function()
+        local tp, ip
+        local ok, err = pcall(function()
+          tp, ip = up_core.build_pools(song, yield, on_progress)
+        end)
+        if not ok then
+          renoise.app():show_warning("Plugin Updater error (pool):\n" .. tostring(err))
+        end
+        up_ui._pools = { track = tp, inst = ip }
+        up_ui._pool_done = true
+      end,
+      task_done,
+      function() return up_ui._closed end)
+
+    -- Task C: wait for both, then match + fill.
+    local nc = up_slicer.run(
+      function()
+        while not (up_ui._scan_done and up_ui._pool_done) do
+          coroutine.yield()
+        end
+        local ok, err = pcall(finalize_match)
+        if not ok then
+          renoise.app():show_warning("Plugin Updater error (match):\n" .. tostring(err))
+        end
+      end,
+      task_done,
+      function() return up_ui._closed end)
+
+    up_ui._scan_notifiers = { na, nb, nc }
+    up_ui._scan_notifier = na
+  else
+    -- Same-song reconcile: reuse the cached candidate pool so this stays
+    -- cheap; only re-read the song's current devices and re-match them.
+    up_ui._scan_notifier = up_slicer.run(
+      function()
         local entries = up_inventory.scan(song, function() coroutine.yield() end, on_progress,
           function(rec) up_ui.found_row(rec) end)
         up_ui._results = {}
@@ -461,34 +558,34 @@ function up_ui.spawn_scan(full)
           table.insert(up_ui._results, result)
           up_ui.fill_row(result)
         end
-      end
-      coroutine.yield()
-      if up_ui._status_text then
-        up_ui._status_text.text = string.format(
-          "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #up_ui._results)
-      end
-      if up_ui._upgrade_btn then
-        up_ui._upgrade_btn.active = true
-      end
-      up_ui._saved_sel = nil
-    end,
-    function()
-      up_ui._scanning = false
-      up_ui._scan_notifier = nil
-      if up_ui._dirty then
-        up_ui._dirty = false
-        up_ui.reconcile()
-      elseif up_ui._post_upgrade_summary then
+        coroutine.yield()
         if up_ui._status_text then
-          up_ui._status_text.text = up_ui._post_upgrade_summary
+          up_ui._status_text.text = string.format(
+            "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #up_ui._results)
         end
         if up_ui._upgrade_btn then
           up_ui._upgrade_btn.active = true
         end
-        up_ui._post_upgrade_summary = nil
-      end
-    end,
-    function() return up_ui._closed end)
+        up_ui._saved_sel = nil
+      end,
+      function()
+        up_ui._scanning = false
+        up_ui._scan_notifier = nil
+        if up_ui._dirty then
+          up_ui._dirty = false
+          up_ui.reconcile()
+        elseif up_ui._post_upgrade_summary then
+          if up_ui._status_text then
+            up_ui._status_text.text = up_ui._post_upgrade_summary
+          end
+          if up_ui._upgrade_btn then
+            up_ui._upgrade_btn.active = true
+          end
+          up_ui._post_upgrade_summary = nil
+        end
+      end,
+      function() return up_ui._closed end)
+  end
 end
 
 function up_ui.start_scan()
@@ -620,6 +717,11 @@ function up_ui.show_dialog()
   up_ui._results = nil
   up_ui._row_views = nil
   up_ui._post_upgrade_summary = nil
+  up_ui._scan_pending = nil
+  up_ui._scan_notifiers = nil
+  up_ui._scan_entries = nil
+  up_ui._scan_done = nil
+  up_ui._pool_done = nil
 
   if up_ui._idle_notifier then
     pcall(function()

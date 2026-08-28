@@ -22,14 +22,8 @@ function up_core.build_pools(song, yield_fn, on_progress, verbose)
   return track_pool, inst_pool
 end
 
-function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress, pools)
-  local entries = up_inventory.scan(song, yield_fn, on_progress, on_found)
-  local track_pool, inst_pool
-  if pools then
-    track_pool, inst_pool = pools.track, pools.inst
-  else
-    track_pool, inst_pool = up_core.build_pools(song, yield_fn, on_progress, false)
-  end
+function up_core.match_entries(entries, pools, yield_fn, on_progress, on_entry)
+  local track_pool, inst_pool = pools.track, pools.inst
   local results = {}
   local n = #entries
   for i, rec in ipairs(entries) do
@@ -51,6 +45,19 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress, pools)
       on_entry(result)
     end
   end
+  return results
+end
+
+function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress, pools)
+  local entries = up_inventory.scan(song, yield_fn, on_progress, on_found)
+  local track_pool, inst_pool
+  if pools then
+    track_pool, inst_pool = pools.track, pools.inst
+  else
+    track_pool, inst_pool = up_core.build_pools(song, yield_fn, on_progress, false)
+  end
+  local results = up_core.match_entries(entries, { track = track_pool, inst = inst_pool },
+    yield_fn, on_progress, on_entry)
   up_core._debug = { track = #track_pool, inst = #inst_pool }
   return results
 end
