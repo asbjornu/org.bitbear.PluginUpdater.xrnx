@@ -4,17 +4,19 @@ local up_swap = {}
 
 -- Try to move the old plugin's state onto the newly inserted device.
 -- Returns ("parameters"|"name") on success, or (nil, reason) on failure.
--- When a parameter-chunk transplant fails (common for cross-protocol swaps,
--- where VST<->VST3 chunks are incompatible) we fall through to preset-name
--- matching before giving up, so we keep as much as possible.
-local function transfer_state(new_dev, old_data, old_preset_name)
+-- A parameter-chunk transplant only works within the SAME plugin format, so
+-- when the source and target protocols differ we skip it (the chunk is
+-- inherently incompatible, e.g. VST<->VST3) and go straight to preset-name
+-- matching; that keeps the upgrade and only loses the saved state.
+local function transfer_state(new_dev, old_data, old_preset_name, same_format)
   print(string.format(
-    "[PluginUpdater] transfer_state: old_data type=%s len=%s preset=%s",
+    "[PluginUpdater] transfer_state: old_data type=%s len=%s preset=%s same_format=%s",
     type(old_data),
     (type(old_data) == "string") and tostring(#old_data) or "-",
-    tostring(old_preset_name)))
+    tostring(old_preset_name),
+    tostring(same_format)))
 
-  if old_data and old_data ~= "" then
+  if old_data and old_data ~= "" and same_format then
     local ok, errmsg = pcall(function() new_dev.active_preset_data = old_data end)
     if ok then
       local ok2, got = pcall(function() return new_dev.active_preset_data end)
@@ -68,6 +70,8 @@ function up_swap.swap_track_device(song, rec, candidate)
   end
   local old_preset_name = up_preset.extract_name(old_device)
   local was_broken = rec.broken
+  local old_proto = rec.analysis and rec.analysis.protocol
+  local same_format = (old_proto and old_proto == candidate.protocol)
 
   local ok_ins, dev_or_err = pcall(function()
     return track:insert_device_at(candidate.path, old_index)
@@ -80,7 +84,7 @@ function up_swap.swap_track_device(song, rec, candidate)
     }
   end
   local new_dev = dev_or_err
-  local method, err = transfer_state(new_dev, old_data, old_preset_name)
+  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format)
   if method then
     pcall(function() track:delete_device_at(old_index + 1) end)
     return {
@@ -113,6 +117,8 @@ function up_swap.swap_instrument(song, rec, candidate)
     old_preset_name = up_preset.extract_name(pp.plugin_device)
   end
   local was_broken = rec.broken
+  local old_proto = rec.analysis and rec.analysis.protocol
+  local same_format = (old_proto and old_proto == candidate.protocol)
 
   local ok_load, loaded = pcall(function() return pp:load_plugin(candidate.path) end)
   if not ok_load or not loaded then
@@ -134,7 +140,7 @@ function up_swap.swap_instrument(song, rec, candidate)
       detail = "new plugin device unavailable after load",
     }
   end
-  local method, err = transfer_state(new_dev, old_data, old_preset_name)
+  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format)
   if method then
     return {
       status = method == "parameters" and "upgraded-with-parameters" or "upgraded-name-matched-preset",
