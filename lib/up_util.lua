@@ -58,20 +58,30 @@ function up_util.family_base(s)
   return t
 end
 
--- The actual product word: the last whitespace/colon-delimited token of the
--- base, with any trailing version stripped. Unlike family_base this ignores a
--- leading vendor prefix, so "Native Instruments: Reaktor5" and "Reaktor6" both
--- collapse to "reaktor" -- which is what we want for best-effort missing-plugin
--- replacement, since the saved song may record a vendor prefix that the
--- installed plugin's display name omits (or vice versa).
-function up_util.product_word(s)
-  if type(s) ~= "string" then return "" end
+-- Significant word tokens of a plugin base (version stripped, lowercased),
+-- used for best-effort matching of missing plugins. e.g.
+-- "Sonic Academy: Kick - Nicky Romero" -> {sonic, academy, kick, nicky, romero}
+-- and "Kick 2" -> {kick}. Single-char tokens are dropped so "Pro-Q" keeps "pro"
+-- but not "q".
+function up_util.token_set(s)
+  if type(s) ~= "string" then return {} end
   local t = s:lower()
   t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
-  t = t:gsub("%s+", " "):match("^%s*(.-)%s*$") or t
-  local seg = t:match("[%s:]+([%w%.%-]+)$")
-  if seg then return seg end
-  return t
+  t = t:gsub("%s+", " ")
+  local set = {}
+  for tok in t:gmatch("[%w%.%-]+") do
+    local w = tok:gsub("[%.%-]", "")
+    if #w >= 2 then set[w] = true end
+  end
+  return set
+end
+
+-- True when every significant token of `a` also appears in `b`.
+function up_util.token_subset(a, b)
+  for k in pairs(a) do
+    if not b[k] then return false end
+  end
+  return true
 end
 
 local function split_segments(s)

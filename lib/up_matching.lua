@@ -257,9 +257,10 @@ end
 
 -- Best-effort match used for broken/missing plugins, where we can't transfer
 -- state and so a newer major version of the same product is an acceptable
--- replacement. Matches on the product word (last token, version stripped),
--- ignoring any leading vendor prefix and protocol -- e.g. "Native Instruments:
--- Reaktor5" matches an installed "Reaktor6".
+-- replacement. A candidate matches when its significant tokens are a subset of
+-- the old plugin's (or vice versa), which tolerates vendor-prefix asymmetry
+-- ("Native Instruments: Reaktor5" <-> "Reaktor6") and artist suffixes
+-- ("Kick - Nicky Romero" <-> "Kick 2"), while still rejecting unrelated plugins.
 function up_matching.candidate_matches_loose(c, old)
   if not old then
     return false
@@ -267,12 +268,12 @@ function up_matching.candidate_matches_loose(c, old)
   if c.path == old.raw then
     return false
   end
-  local pw_c = up_util.product_word(c.base)
-  local pw_o = up_util.product_word(old.base)
-  if pw_c == "" or pw_o == "" then
+  local tc = up_util.token_set(c.base)
+  local to = up_util.token_set(old.base)
+  if not next(tc) or not next(to) then
     return false
   end
-  return pw_c == pw_o
+  return up_util.token_subset(tc, to) or up_util.token_subset(to, tc)
 end
 
 function up_matching.find_candidate(pool, old_analysis)
