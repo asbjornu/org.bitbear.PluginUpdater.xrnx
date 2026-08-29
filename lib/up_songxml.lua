@@ -59,13 +59,14 @@ local function read_song_xml(song)
   return xml
 end
 
--- Recover plugin identity per instrument, keyed by 1-based instrument index
--- (parallel to song.instruments). Only instruments that actually have a plugin
--- (a <PluginType> element) are included, so samplers are skipped.
-function up_songxml.recover(song)
+-- Parse a Song.xml string into per-instrument plugin identities, keyed by
+-- 1-based instrument index (parallel to song.instruments). Only instruments
+-- that actually have a plugin (a <PluginType> element) are included, so samplers
+-- are skipped. Exposed separately from recover() so it can be unit-tested
+-- without a real .xrns file.
+function up_songxml.parse_instruments(xml)
   local out = {}
-  local xml = read_song_xml(song)
-  if not xml then
+  if type(xml) ~= "string" or xml == "" then
     return out
   end
   local idx = 0
@@ -88,6 +89,17 @@ function up_songxml.recover(song)
     end
   end
   return out
+end
+
+-- Recover plugin identity per instrument, keyed by 1-based instrument index
+-- (parallel to song.instruments). Only instruments that actually have a plugin
+-- (a <PluginType> element) are included, so samplers are skipped.
+function up_songxml.recover(song)
+  local xml = read_song_xml(song)
+  if not xml then
+    return {}
+  end
+  return up_songxml.parse_instruments(xml)
 end
 
 function up_songxml.invalidate_cache()
