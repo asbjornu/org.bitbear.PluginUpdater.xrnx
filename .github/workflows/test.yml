@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, renoise/3.5.4]
+  pull_request:
+
+jobs:
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Lua 5.1 (matches Renoise's LuaJIT)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1 unzip
+
+      - name: Lua version
+        run: lua5.1 -v
+
+      - name: Compile-check all sources
+        run: |
+          set -e
+          for f in main.lua lib/*.lua; do
+            echo "checking $f"
+            lua5.1 -e "assert(loadfile('$f'))"
+          done
+
+      - name: Run test suite
+        run: lua5.1 tests/run.lua
