@@ -61,8 +61,10 @@ end
 -- Significant word tokens of a plugin base (version stripped, lowercased),
 -- used for best-effort matching of missing plugins. e.g.
 -- "Sonic Academy: Kick - Nicky Romero" -> {sonic, academy, kick, nicky, romero}
--- and "Kick 2" -> {kick}. Single-char tokens are dropped so "Pro-Q" keeps "pro"
--- but not "q".
+-- and "Kick 2" -> {kick}. Single-char tokens are kept (so "Pro-Q" keeps "q",
+-- which distinguishes it from "Pro-MB"); subset comparison makes stray
+-- single-char tokens harmless because a match requires ALL of one side's tokens
+-- to appear in the other.
 function up_util.token_set(s)
   if type(s) ~= "string" then return {} end
   local t = s:lower()
@@ -71,7 +73,7 @@ function up_util.token_set(s)
   local set = {}
   for tok in t:gmatch("[%w%.%-]+") do
     local w = tok:gsub("[%.%-]", "")
-    if #w >= 2 then set[w] = true end
+    if #w > 0 then set[w] = true end
   end
   return set
 end

@@ -293,16 +293,16 @@ function up_matching.find_candidate(pool, old_analysis)
   return best
 end
 
--- old_or_rec may be the analysis table or the full inventory rec. When it is the
--- rec and the entry is broken/recovered (a missing plugin), exact matches are
--- preferred but, failing those, a version-flexible family match is offered so a
--- newer major version can replace the absent one.
+-- old_or_rec may be the analysis table or the full inventory rec. Exact matches
+-- (same product + version, any protocol) are preferred; when none exist we fall
+-- back to a version/name-flexible family match. That covers missing plugins
+-- recovered from the song, and healthy plugins whose installed equivalent differs
+-- in version or branding -- e.g. AU "FabFilter FF Pro MB" -> VST3 "FabFilter
+-- Pro-MB", or Reaktor5 -> Reaktor6.
 function up_matching.find_candidates(pool, old_or_rec)
   local old_analysis = old_or_rec
-  local broken = false
   if type(old_or_rec) == "table" and old_or_rec.analysis then
     old_analysis = old_or_rec.analysis
-    broken = not not (old_or_rec.broken or old_or_rec.recovered)
   end
   if not old_analysis then
     return {}
@@ -317,12 +317,12 @@ function up_matching.find_candidates(pool, old_or_rec)
     table.sort(list, function(a, b) return up_util.rank(a) > up_util.rank(b) end)
     return list
   end
-  if broken then
-    for _, c in ipairs(pool) do
-      if up_matching.candidate_matches_loose(c, old_analysis) then
-        table.insert(list, c)
-      end
+  for _, c in ipairs(pool) do
+    if up_matching.candidate_matches_loose(c, old_analysis) then
+      table.insert(list, c)
     end
+  end
+  if #list > 0 then
     table.sort(list, function(a, b)
       local sa = (a.protocol == old_analysis.protocol) and 1 or 0
       local sb = (b.protocol == old_analysis.protocol) and 1 or 0
