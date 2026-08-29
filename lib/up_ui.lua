@@ -210,29 +210,46 @@ function up_ui.on_song_loaded()
 end
 
 -- This Renoise build has no Dialog:add_close_notifier, so detect closure by
--- polling: a closed dialog's content view has no parent.
+-- polling. A dialog's root content never gets a `parent` in this build, so use the
+-- `visible` flag instead: it is true while shown and flips to false on close.
 local function dialog_is_open()
-  if not up_ui._dialog then
+  if not up_ui._dialog or up_ui._closed then
     return false
   end
-  local ok, parent = pcall(function() return up_ui._dialog.content.parent end)
-  return ok and parent ~= nil
+  local ok, visible = pcall(function() return up_ui._dialog.visible end)
+  if ok and visible == false then
+    return false
+  end
+  return true
 end
 
+local _closed_blanks = 0
 local function watch_tick()
-  if up_ui._closed then
-    return
-  end
-  if not dialog_is_open() then
-    up_ui._closed = true
-    up_ui.stop_all()
-    up_ui.detach_observers()
-    pcall(function()
-      if up_ui._watch_fn then
-        renoise.tool().app_idle_observable:remove_notifier(up_ui._watch_fn)
+  local ok, err = pcall(function()
+    if up_ui._closed then
+      return
+    end
+    if not dialog_is_open() then
+      -- Tolerate a few transient "not open" ticks before tearing down, in case the
+      -- visibility flag lags the dialog's actual show/close transition.
+      _closed_blanks = _closed_blanks + 1
+      if _closed_blanks >= 3 then
+        up_ui._closed = true
+        up_ui.stop_all()
+        up_ui.detach_observers()
+        pcall(function()
+          if up_ui._watch_fn then
+            renoise.tool().app_idle_observable:remove_notifier(up_ui._watch_fn)
+          end
+        end)
+        up_ui._watch_fn = nil
       end
-    end)
-    up_ui._watch_fn = nil
+    else
+      _closed_blanks = 0
+    end
+  end)
+  if not ok then
+    print(string.format("[PluginUpdater][watch] watch_tick ERROR: %s", tostring(err)))
   end
 end
 
