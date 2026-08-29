@@ -1,0 +1,5 @@
+return {
+  reporter = "lcov",
+  reportfile = "coverage.lcov",
+  include = { "lib/.*" },
+}

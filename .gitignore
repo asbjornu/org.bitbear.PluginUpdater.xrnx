@@ -1,1 +1,4 @@
 *.xrnx
+luacov.stats.out
+coverage.lcov
+

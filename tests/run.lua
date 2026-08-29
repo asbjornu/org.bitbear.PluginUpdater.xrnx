@@ -10,8 +10,9 @@
 -- scan wired to a mocked song. Each library file is also compile-checked.
 ------------------------------------------------------------------------------
 
-local root = arg[0]:match("(.*)/tests/run%.lua$") or "."
-package.path = root .. "/lib/?.lua;" .. package.path
+local root = arg[0]:match("(.*)/tests/run%.lua$")
+if not root or root == "" then root = "." end
+package.path = (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
 
 -- Mock the Renoise global. The fixture path is resolved from the script location
 -- so the suite runs regardless of the current working directory.
