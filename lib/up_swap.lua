@@ -99,6 +99,121 @@ local function apply_param_values(new_dev, old_params)
   return applied
 end
 
+-- Preserve plugin automation across a replacement. Renoise discards a device's
+-- automation when the device is removed, so we rebind (track devices) or
+-- re-create (instrument plugins) the automation onto the replacement device's
+-- parameters, matched by name. All of this is best-effort and fully guarded: a
+-- failure here must never abort the upgrade itself.
+
+local function capture_automation(device, song)
+  local out = {}
+  if not device or not song then return out end
+  local ok_p, params = pcall(function() return device.parameters end)
+  if not ok_p or not params then return out end
+  for _, p in ipairs(params) do
+    local ok_a, a = pcall(function() return song:automation(p) end)
+    if ok_a and a and a.is_automated then
+      local ok_n, name = pcall(function() return p.name end)
+      if ok_n and type(name) == "string" and name ~= "" then
+        out[name] = { param = p, auto = a }
+      end
+    end
+  end
+  return out
+end
+
+-- Track devices: both devices briefly coexist (new inserted at old_index, old
+-- pushed to old_index+1), so we can rebind the live automation objects onto the
+-- new device's same-named parameters before deleting the old device.
+local function rebind_automation(captured, new_device)
+  local count = 0
+  if not new_device then return count end
+  local ok_p, params = pcall(function() return new_device.parameters end)
+  if not ok_p or not params then return count end
+  local by_name = {}
+  for _, p in ipairs(params) do
+    local ok_n, n = pcall(function() return p.name end)
+    if ok_n and type(n) == "string" and n ~= "" then by_name[n] = p end
+  end
+  for name, entry in pairs(captured) do
+    local np = by_name[name]
+    if np then
+      local ok = pcall(function() entry.auto.device_parameter = np end)
+      if ok then count = count + 1 end
+    end
+  end
+  return count
+end
+
+-- Instrument plugins are replaced in place (load_plugin), so the old device is
+-- gone by the time the new one exists. Snapshot the automation data and rebuild
+-- it on the new device's same-named parameters.
+local function capture_automation_data(device, song)
+  local out = {}
+  if not device or not song then return out end
+  local ok_p, params = pcall(function() return device.parameters end)
+  if not ok_p or not params then return out end
+  for _, p in ipairs(params) do
+    local ok_a, a = pcall(function() return song:automation(p) end)
+    if ok_a and a and a.is_automated then
+      local ok_n, name = pcall(function() return p.name end)
+      if not (ok_n and type(name) == "string" and name ~= "") then name = nil end
+      local data = { playback = a.playback_mode }
+      if a.linked_device_parameter then
+        local ok_l, ln = pcall(function() return a.linked_device_parameter.name end)
+        data.linked = (ok_l and type(ln) == "string" and ln ~= "") and ln or nil
+      else
+        local pts = {}
+        local ok_pts, src = pcall(function() return a.points end)
+        if ok_pts and src then
+          for _, pt in ipairs(src) do
+            pts[#pts + 1] = { time = pt.time, value = pt.value }
+          end
+        end
+        data.points = pts
+      end
+      out[name or (#out + 1)] = data
+    end
+  end
+  return out
+end
+
+local function restore_automation_data(captured, new_device, song)
+  local count = 0
+  if not new_device or not song then return count end
+  local ok_p, params = pcall(function() return new_device.parameters end)
+  if not ok_p or not params then return count end
+  local by_name = {}
+  for _, p in ipairs(params) do
+    local ok_n, n = pcall(function() return p.name end)
+    if ok_n and type(n) == "string" and n ~= "" then by_name[n] = p end
+  end
+  for name, data in pairs(captured) do
+    local np = by_name[name]
+    if np then
+      local ok_a, na = pcall(function() return song:automation(np) end)
+      if ok_a and na then
+        pcall(function() na.playback_mode = data.playback end)
+        if data.linked then
+          local lp = by_name[data.linked]
+          if lp then pcall(function() na.linked_device_parameter = lp end) end
+        else
+          local pts = data.points or {}
+          local ok_set = pcall(function() na.points = pts end)
+          if not ok_set then
+            pcall(function() if na.clear then na:clear() end end)
+            for _, pt in ipairs(pts) do
+              pcall(function() na:add_point_at(pt.time, pt.value) end)
+            end
+          end
+        end
+        count = count + 1
+      end
+    end
+  end
+  return count
+end
+
 -- Try to move the old plugin's state onto the newly inserted device.
 -- Returns ("parameters"|"name"|"params") on success, or (nil, reason) on
 -- failure. A parameter-chunk transplant only works within the SAME plugin
@@ -170,6 +285,7 @@ function up_swap.swap_track_device(song, rec, candidate)
   local track = song.tracks[rec.track_index]
   local old_index = rec.device_index
   local old_device = track.devices[old_index]
+  local captured_auto = capture_automation(old_device, song)
   local old_data = nil
   local ok_pd, pd = pcall(function() return old_device.active_preset_data end)
   if ok_pd then
@@ -197,6 +313,7 @@ function up_swap.swap_track_device(song, rec, candidate)
   end
   local new_dev = dev_or_err
   dump_params(new_dev, "NEW")
+  local auto_count = rebind_automation(captured_auto, new_dev)
   local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   -- Set is_active last: transfer_state may load a base preset, which can reset
   -- the device to active; applying it afterwards keeps the old bypass state.
@@ -212,6 +329,9 @@ function up_swap.swap_track_device(song, rec, candidate)
       status = status,
       new_path = candidate.path,
       method = method,
+      detail = (auto_count and auto_count > 0)
+        and ("automation preserved: " .. auto_count .. " parameter(s)")
+        or nil,
     }
   end
   -- The new plugin is inserted and valid. The upgrade (protocol change) still
@@ -232,6 +352,7 @@ function up_swap.swap_instrument(song, rec, candidate)
   local old_params = {}
   local old_preset_name = nil
   local old_active = nil
+  local captured_auto = nil
   if rec.plugin_loaded and pp.plugin_device then
     local ok_pd, pd = pcall(function() return pp.plugin_device.active_preset_data end)
     if ok_pd then
@@ -241,6 +362,7 @@ function up_swap.swap_instrument(song, rec, candidate)
     old_preset_name = up_preset.extract_name(pp.plugin_device)
     local ok_act, act = pcall(function() return pp.plugin_device.is_active end)
     if ok_act then old_active = act end
+    captured_auto = capture_automation_data(pp.plugin_device, song)
   end
   -- Missing plugin: the live API exposes no preset, but the instrument name is
   -- usually the user's patch/preset (e.g. a Reaktor ensemble). The replacement
@@ -268,6 +390,7 @@ function up_swap.swap_instrument(song, rec, candidate)
     pcall(function() new_dev.is_active = old_active end)
   end
   if new_dev then dump_params(new_dev, "NEW") end
+  local auto_count = restore_automation_data(captured_auto, new_dev, song)
   if not new_dev then
     if rec.device_path then
       pcall(function() pp:load_plugin(rec.device_path) end)
@@ -287,6 +410,9 @@ function up_swap.swap_instrument(song, rec, candidate)
       status = status,
       new_path = candidate.path,
       method = method,
+      detail = (auto_count and auto_count > 0)
+        and ("automation preserved: " .. auto_count .. " parameter(s)")
+        or nil,
     }
   end
   -- load_plugin already replaced the instrument plugin in place, so the upgrade
