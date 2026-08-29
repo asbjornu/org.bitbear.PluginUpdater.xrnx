@@ -637,7 +637,7 @@ function up_ui.spawn_scan(full)
           end
           coroutine.yield()
           local pool = (rec.kind == "track") and up_ui._pools.track or up_ui._pools.inst
-          local cands = up_matching.find_candidates(pool, rec.analysis)
+          local cands = up_matching.find_candidates(pool, rec)
           local result = { entry = rec, candidates = cands, candidate = cands[1] }
           table.insert(up_ui._results, result)
           up_ui.fill_row(result)

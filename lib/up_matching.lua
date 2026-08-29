@@ -255,6 +255,26 @@ function up_matching.candidate_matches(c, old)
   return up_matching.vendor_ok(c, old)
 end
 
+-- Best-effort match used for broken/missing plugins, where we can't transfer
+-- state and so a newer major version of the same product is an acceptable
+-- replacement. Matches on the product word (last token, version stripped),
+-- ignoring any leading vendor prefix and protocol -- e.g. "Native Instruments:
+-- Reaktor5" matches an installed "Reaktor6".
+function up_matching.candidate_matches_loose(c, old)
+  if not old then
+    return false
+  end
+  if c.path == old.raw then
+    return false
+  end
+  local pw_c = up_util.product_word(c.base)
+  local pw_o = up_util.product_word(old.base)
+  if pw_c == "" or pw_o == "" then
+    return false
+  end
+  return pw_c == pw_o
+end
+
 function up_matching.find_candidate(pool, old_analysis)
   if not old_analysis then
     return nil
@@ -272,7 +292,17 @@ function up_matching.find_candidate(pool, old_analysis)
   return best
 end
 
-function up_matching.find_candidates(pool, old_analysis)
+-- old_or_rec may be the analysis table or the full inventory rec. When it is the
+-- rec and the entry is broken/recovered (a missing plugin), exact matches are
+-- preferred but, failing those, a version-flexible family match is offered so a
+-- newer major version can replace the absent one.
+function up_matching.find_candidates(pool, old_or_rec)
+  local old_analysis = old_or_rec
+  local broken = false
+  if type(old_or_rec) == "table" and old_or_rec.analysis then
+    old_analysis = old_or_rec.analysis
+    broken = not not (old_or_rec.broken or old_or_rec.recovered)
+  end
   if not old_analysis then
     return {}
   end
@@ -282,7 +312,23 @@ function up_matching.find_candidates(pool, old_analysis)
       table.insert(list, c)
     end
   end
-  table.sort(list, function(a, b) return up_util.rank(a) > up_util.rank(b) end)
+  if #list > 0 then
+    table.sort(list, function(a, b) return up_util.rank(a) > up_util.rank(b) end)
+    return list
+  end
+  if broken then
+    for _, c in ipairs(pool) do
+      if up_matching.candidate_matches_loose(c, old_analysis) then
+        table.insert(list, c)
+      end
+    end
+    table.sort(list, function(a, b)
+      local sa = (a.protocol == old_analysis.protocol) and 1 or 0
+      local sb = (b.protocol == old_analysis.protocol) and 1 or 0
+      if sa ~= sb then return sa > sb end
+      return up_util.rank(a) > up_util.rank(b)
+    end)
+  end
   return list
 end
 

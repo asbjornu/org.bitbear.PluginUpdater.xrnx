@@ -45,6 +45,35 @@ function up_util.extract_version(product)
   return nil
 end
 
+-- Product stem with any trailing version stripped, so different major versions
+-- of the same plugin collapse to one family key, e.g. "reaktor5" and "reaktor6"
+-- both become "reaktor" (and "native instruments: reaktor 6" -> the same). Used
+-- for best-effort matching of missing plugins, where we can't transfer state
+-- anyway, so a newer major version is an acceptable replacement.
+function up_util.family_base(s)
+  if type(s) ~= "string" then return "" end
+  local t = s:lower()
+  t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
+  t = t:gsub("%s+", " "):match("^%s*(.-)%s*$") or t
+  return t
+end
+
+-- The actual product word: the last whitespace/colon-delimited token of the
+-- base, with any trailing version stripped. Unlike family_base this ignores a
+-- leading vendor prefix, so "Native Instruments: Reaktor5" and "Reaktor6" both
+-- collapse to "reaktor" -- which is what we want for best-effort missing-plugin
+-- replacement, since the saved song may record a vendor prefix that the
+-- installed plugin's display name omits (or vice versa).
+function up_util.product_word(s)
+  if type(s) ~= "string" then return "" end
+  local t = s:lower()
+  t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
+  t = t:gsub("%s+", " "):match("^%s*(.-)%s*$") or t
+  local seg = t:match("[%s:]+([%w%.%-]+)$")
+  if seg then return seg end
+  return t
+end
+
 local function split_segments(s)
   s = s:gsub("[:/\\]+", "|")
   local segs = {}

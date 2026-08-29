@@ -83,7 +83,7 @@ function up_core.match_entries(entries, pools, yield_fn, on_progress, on_entry)
       yield_fn()
     end
     local pool = (rec.kind == "track") and track_pool or inst_pool
-    local candidates = up_matching.find_candidates(pool, rec.analysis)
+    local candidates = up_matching.find_candidates(pool, rec)
     local result = {
       entry = rec,
       candidates = candidates,

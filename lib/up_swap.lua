@@ -124,7 +124,6 @@ local function transfer_state(new_dev, old_data, old_preset_name, same_format, o
       if ok2 and got and got ~= "" then
         return "parameters"
       end
-      errmsg = "transplant resulted in empty/default state"
     else
       print(string.format("[PluginUpdater]   active_preset_data assignment failed: %s",
         tostring(errmsg)))
@@ -197,11 +196,13 @@ function up_swap.swap_track_device(song, rec, candidate)
     }
   end
   local new_dev = dev_or_err
+  dump_params(new_dev, "NEW")
+  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
+  -- Set is_active last: transfer_state may load a base preset, which can reset
+  -- the device to active; applying it afterwards keeps the old bypass state.
   if old_active ~= nil then
     pcall(function() new_dev.is_active = old_active end)
   end
-  dump_params(new_dev, "NEW")
-  local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   if method then
     pcall(function() track:delete_device_at(old_index + 1) end)
     local status = method == "parameters" and "upgraded-with-parameters"
@@ -240,6 +241,13 @@ function up_swap.swap_instrument(song, rec, candidate)
     old_preset_name = up_preset.extract_name(pp.plugin_device)
     local ok_act, act = pcall(function() return pp.plugin_device.is_active end)
     if ok_act then old_active = act end
+  end
+  -- Missing plugin: the live API exposes no preset, but the instrument name is
+  -- usually the user's patch/preset (e.g. a Reaktor ensemble). The replacement
+  -- plugin keeps its own presets (stored in the plugin, not the song), so try to
+  -- load it by that name in the newly inserted plugin.
+  if not old_preset_name and rec.broken and rec.instrument_name and rec.instrument_name ~= "" then
+    old_preset_name = rec.instrument_name
   end
   dump_params(pp.plugin_device, "OLD")
   local was_broken = rec.broken
