@@ -26,6 +26,7 @@ local up_matching  = require("up_matching")
 local up_preset    = require("up_preset")
 local up_songxml   = require("up_songxml")
 local up_inventory = require("up_inventory")
+local up_zip       = require("up_zip")
 
 local failures = 0
 local function check(cond, msg)
@@ -196,6 +197,16 @@ do
   check(info[2] and info[2].display_name == "AU: Native Instruments: Reaktor5",
     "recover() parses the .xrns fixture")
   check(info[3] and info[3].instrument_name == "Kick NR", "recover() reads instrument <Name>")
+end
+
+section("up_zip.extract (pure-Lua zip reader)")
+do
+  local xml = up_zip.extract(fixture, "Song.xml")
+  check(xml ~= nil and xml ~= "", "extracts Song.xml from the .xrns fixture")
+  check(xml and xml:find("<Song>") ~= nil, "extracted Song.xml is well-formed XML")
+  check(xml and xml:find("PluginDisplayName") ~= nil, "extracted Song.xml has plugin identities")
+  local missing = up_zip.extract(fixture, "no-such-entry.xml")
+  check(missing == nil, "missing entry returns nil")
 end
 
 -- 6. up_inventory.scan (mocked song) ------------------------------------------
