@@ -282,7 +282,7 @@ function up_ui.clear_list()
   local list_box = up_ui._list_box
   if up_ui._mounted then
     for _, row in ipairs(up_ui._mounted) do
-      list_box:remove_child(row)
+      pcall(function() list_box:remove_child(row) end)
     end
   end
   up_ui._mounted = {}
@@ -324,7 +324,7 @@ function up_ui.apply_scroll()
   local list_box = up_ui._list_box
   if up_ui._mounted then
     for _, row in ipairs(up_ui._mounted) do
-      list_box:remove_child(row)
+      pcall(function() list_box:remove_child(row) end)
     end
   end
   up_ui._mounted = {}
@@ -798,6 +798,13 @@ function up_ui.show_dialog()
   up_ui._scan_entries = nil
   up_ui._scan_done = nil
   up_ui._pool_done = nil
+  -- A fresh dialog gets a brand-new ViewBuilder/list_box, so any rows still
+  -- referenced from a previous (now-destroyed) dialog must be discarded. Without
+  -- this, clear_list tries to remove them from the new list_box and throws
+  -- "view not added to parent", aborting the scan before it starts.
+  up_ui._mounted = {}
+  up_ui._data_rows = {}
+  up_ui._header_row = nil
 
   if up_ui._idle_notifier then
     pcall(function()
