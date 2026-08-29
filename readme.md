@@ -1,4 +1,4 @@
-# Plugin Updater (org.bitbear.PluginUpdater)
+# Plugin Updater
 
 A Renoise tool that scans the current song for **outdated or broken plugin
 devices** (track FX chains and instrument plugins), finds the best installed
@@ -10,27 +10,77 @@ candidate, and upgrades them while trying to preserve the previous preset/state.
    device at index 1) and every instrument plugin. For each plugin it records
    its location, `device_path`/`name`, whether the API can still read its
    fields (this directly answers the "are broken devices visible?" question),
-   and the parsed family (vendor + base name, version stripped).
+   and the parsed family (vendor + base name, version preserved). For
+   instruments whose plugin fails to load (so the live API exposes no path or
+   name) the original identity is recovered from the song's `Song.xml` (see
+   *Missing / broken plugins* below), so they can still be matched.
 2. **Candidate matching.** Builds a lookup from Renoise's own resolved
    installed-plugin lists (`track.available_device_infos` and
-   `instrument.plugin_properties.available_plugin_infos`). Groups by family and
-   ranks by **CLAP > VST3 > VST > AU** and by version.
-3. **Swap + state transfer (per device, pcall-guarded).** For each outdated or
-   broken device it: captures the old `active_preset_data`, inserts the new
-   plugin at the same position, then (a) transplants the old state directly, or
-   (b) falls back to matching the old preset **name** against the new plugin's
-   presets, or (c) reverts so the song is left exactly as it was. Broken devices
-   are replaced by the new plugin loaded at default state (strictly better than
-   a missing plugin).
-4. **Reporting + safety.** Shows a full per-device report and a status summary.
-   **It never saves the song** — you inspect/undo, and Renoise's own undo stack
-   covers the device swaps.
+   `instrument.plugin_properties.available_plugin_infos`). Groups by family (the
+   version is kept, so Pro-Q 2 ≠ Pro-Q 3) and ranks by
+   **CLAP > VST3 > VST > AU** and by version. Cross-format / cross-branding
+   upgrades are allowed (e.g. an AU `FabFilter FF Pro-MB` can be replaced by a
+   VST3 `FabFilter Pro-MB`) as long as the base name and vendor match.
+3. **Swap + state transfer (per device, pcall-guarded).** For each chosen
+   device it inserts the new plugin at the same position, then transfers the old
+   state: (a) if the formats match, transplant the old `active_preset_data`
+   directly; (b) if the formats differ, load a same-named factory preset as a
+   base and overlay the old plugin's captured parameter values (matched by
+   name); (c) if no transfer method succeeds, keep the new plugin at default
+   state — strictly better than a missing plugin. The device enabled/bypass
+   flag is preserved.
+4. **Per-row UI + live refresh.** Shows a grid with the current plugin, a
+   "Replace with" dropdown of candidates (auto-selecting the best upgrade), and
+   a result column. The dialog watches the song and re-scans (reusing the cached
+   candidate pool) when devices/tracks/instruments change, preserving your
+   previous dropdown choices. **It never saves the song** — you inspect/undo,
+   and Renoise's own undo stack covers the device swaps.
 
-## Dry run (default)
+## Using it
 
-The dialog opens with **"Dry run (report only)"** checked. Press **Scan** to get
-the upgrade plan without touching anything. Uncheck it (or press **Run
-Upgrades**) to perform the swaps.
+- Open a song, then pick **Tools → Plugin Updater** (or the global key binding
+  you can assign in the Keyboard preferences). The dialog opens and immediately
+  scans, building the candidate list in the background ("gathering replacements"
+  — the slow part, run concurrently with the song scan so rows appear at once).
+- Each row shows the current plugin and a **Replace with** dropdown. By default
+  the best candidate is pre-selected; set a row to **"Keep current"** to leave
+  that device alone. The current device's active preset name is shown when
+  available.
+- Press **Upgrade** to swap the selected devices. While running the button
+  becomes **Stop** (the swaps already performed are kept). Nothing is written to
+  disk unless you save the song yourself.
+- The status line reports progress, and a final summary counts results per
+  status (e.g. `upgraded-with-parameters`, `upgraded-parameter-synth`,
+  `upgraded-default`, `skipped-up-to-date`, `skipped-no-candidate-broken`).
+
+## Missing / broken plugins
+
+- **Broken *instrument* plugins:** when a plugin fails to load,
+  `plugin_device` is `nil`, so the live API exposes no path or name. The tool
+  reads the song's own `.xrns` archive (a zip containing `Song.xml`, which
+  records every plugin's identity, including missing ones) to recover the
+  original display name, then matches and upgrades it. The replacement loads at
+  default state unless the instrument name resolves to a preset in the
+  installed plugin's own bank.
+- **Broken *track* devices:** detected when `active_preset_data` raises an
+  error; these are listed as broken and matched normally from their
+  `device_path`/`name`.
+- **Missing-plugin name matching** is best-effort and version-flexible: it
+  normalizes names (stripping protocol/category tags, architecture markers, and
+  unifying separators) and uses a token-subset comparison, so e.g.
+  `Kick - Nicky Romero` can map to `Kick 2`.
+
+## Limitations / things to verify in Renoise
+
+- **Preset-name fallback** parses the old `active_preset_data` XML for a name;
+  this is best-effort and plugin-dependent. For missing plugins recovered from
+  `Song.xml` only the identity is known, so state is generally not transferable.
+- **State transplant verification** accepts the transplant unless it raises an
+  error or yields an empty state; some plugins re-encode preset data, so always
+  sanity-check upgraded devices by ear.
+- **Cross-format upgrades** carry state via captured parameter values matched
+  by name; parameters the new plugin doesn't expose (or that aren't automatable)
+  are dropped.
 
 ## Installation
 
@@ -45,27 +95,16 @@ This folder *is* the tool bundle (named after the tool id,
   `org.bitbear.PluginUpdater.xrnx` (the `.xrnx` extension *is* a zip) and
   install it from Renoise's *Tools → Install* browser, or double-click it.
 
-After install you'll find **Tools → Upgrade Outdated Plugins...** in the main
-menu (and a global key binding you can assign in the Keyboard preferences).
-
-## Limitations / things to verify in Renoise
-
-- **Broken *instrument* plugins:** when a plugin fails to load,
-  `plugin_device` is `nil`, so the original plugin id is not exposed by the API.
-  Such instruments cannot be auto-matched (the report notes this). Healthy
-  plugin instruments and all track plugins are matched normally.
-- **Preset-name fallback** parses the old `active_preset_data` XML for a name;
-  this is best-effort and plugin-dependent.
-- **State transplant verification** accepts the transplant unless it raises an
-  error or yields an empty state; some plugins re-encode preset data, so always
-  sanity-check upgraded devices by ear.
+After install you'll find **Tools → Plugin Updater** in the main menu (and a
+global key binding you can assign in the Keyboard preferences).
 
 ## Testing checklist (needs a live Renoise session)
 
 - On a scratch song, include one plugin known to reject cross-version state
   (e.g. FabFilter Saturn 1 → 2) and one that accepts it, and confirm the
-  pcall-guarded fallback chain behaves (direct transplant, then named-preset,
-  then revert).
+  pcall-guarded fallback chain behaves (direct transplant, then preset+param
+  overlay, then default-state upgrade).
 - Test against a **copy** of a real project (never the original) to confirm
-  broken track devices are visible and repairable, and that up-to-date devices
-  are reported as `skipped-up-to-date`.
+  broken track devices are visible and repairable, that up-to-date devices are
+  reported as `skipped-up-to-date`, and that a missing instrument is recovered
+  from `Song.xml` and upgraded.
