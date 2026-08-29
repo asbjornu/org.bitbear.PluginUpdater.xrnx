@@ -1,7 +1,10 @@
 # Plugin Updater
 
+![Build](https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/build.yml/badge.svg)
 ![Tests](https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/test.yml/badge.svg)
 [![codecov](https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx/branch/renoise%2F3.5.4/graph/badge.svg)](https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx)
+![License](https://img.shields.io/github/license/asbjornu/org.bitbear.PluginUpdater.xrnx)
+![Renoise API](https://img.shields.io/badge/Renoise%20API-6-blue)
 ![Lua](https://img.shields.io/badge/Lua-5.1%20%2F%20LuaJIT-blue)
 
 A Renoise tool that scans the current song for **outdated or broken plugin
