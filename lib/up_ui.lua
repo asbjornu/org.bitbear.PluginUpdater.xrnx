@@ -59,6 +59,8 @@ local function old_label(rec)
   local preset
   if rec.kind == "instrument" then
     preset = rec.instrument_name
+  elseif rec.active_preset_name then
+    preset = rec.active_preset_name
   elseif rec.active_preset then
     preset = rec.active_preset
   end

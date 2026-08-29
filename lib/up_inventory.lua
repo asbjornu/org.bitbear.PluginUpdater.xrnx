@@ -44,6 +44,12 @@ local function inspect_track_device(track, track_index, dev_index)
   local ok_ap, ap = pcall(function() return dev.active_preset end)
   if ok_ap then
     rec.active_preset = ap
+    if ap and ap > 0 then
+      local ok_p, presets = pcall(function() return dev.presets end)
+      if ok_p and presets and presets[ap] then
+        rec.active_preset_name = presets[ap]
+      end
+    end
   end
   return rec
 end
