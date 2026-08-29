@@ -34,6 +34,7 @@ up_ui._saved_sel = nil
 up_ui._scanning = false
 up_ui._upgrading = false
 up_ui._dirty = false
+up_ui._watch_fn = nil
 
 -- Stable identity for a scanned entry, used to preserve the user's dropdown
 -- choice across re-scans of the same song.
@@ -204,11 +205,47 @@ end
 -- A different song was loaded: rebuild everything from scratch, including the
 -- candidate pool (the only "complete refresh" we do).
 function up_ui.on_song_loaded()
-  if not (up_ui._dialog and pcall(function() return up_ui._dialog.visible end)) then
-    return
-  end
   up_ui.attach_observers()
   up_ui.start_scan()
+end
+
+-- This Renoise build has no Dialog:add_close_notifier, so detect closure by
+-- polling: a closed dialog's content view has no parent.
+local function dialog_is_open()
+  if not up_ui._dialog then
+    return false
+  end
+  local ok, parent = pcall(function() return up_ui._dialog.content.parent end)
+  return ok and parent ~= nil
+end
+
+local function watch_tick()
+  if up_ui._closed then
+    return
+  end
+  if not dialog_is_open() then
+    up_ui._closed = true
+    up_ui.stop_all()
+    up_ui.detach_observers()
+    pcall(function()
+      if up_ui._watch_fn then
+        renoise.tool().app_idle_observable:remove_notifier(up_ui._watch_fn)
+      end
+    end)
+    up_ui._watch_fn = nil
+  end
+end
+
+function up_ui.watch_dialog()
+  if up_ui._watch_fn then
+    pcall(function()
+      renoise.tool().app_idle_observable:remove_notifier(up_ui._watch_fn)
+    end)
+  end
+  up_ui._watch_fn = watch_tick
+  pcall(function()
+    renoise.tool().app_idle_observable:add_notifier(up_ui._watch_fn)
+  end)
 end
 
 function up_ui.summary()
@@ -617,6 +654,9 @@ end
 -- Update the grid for the same song without rebuilding the candidate pool.
 -- Existing selections are preserved; added/removed devices get/lose rows.
 function up_ui.reconcile()
+  if up_ui._closed then
+    return
+  end
   if not up_ui._pools then
     up_ui.start_scan()
     return
@@ -818,29 +858,7 @@ function up_ui.show_dialog()
   up_ui._visible = PLUGIN_ROWS_VISIBLE
 
   up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
-
-  local function on_close()
-    up_ui._closed = true
-    up_ui.stop_all()
-    up_ui.detach_observers()
-  end
-
-  if pcall(function() return up_ui._dialog.add_close_notifier end) then
-    up_ui._dialog:add_close_notifier(on_close)
-  else
-    local idle = function()
-      local ok, vis = pcall(function() return up_ui._dialog.visible end)
-      if (ok and vis == false) or (not ok) then
-        on_close()
-        if up_ui._idle_notifier then
-          renoise.tool().app_idle_observable:remove_notifier(up_ui._idle_notifier)
-          up_ui._idle_notifier = nil
-        end
-      end
-    end
-    up_ui._idle_notifier = idle
-    renoise.tool().app_idle_observable:add_notifier(idle)
-  end
+  up_ui.watch_dialog()
   up_ui.attach_observers()
   up_ui.start_scan()
 end
