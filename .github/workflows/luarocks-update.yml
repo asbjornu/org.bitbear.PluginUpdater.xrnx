@@ -1,0 +1,89 @@
+name: Update LuaRocks dependencies
+
+# Dependabot has no LuaRocks ecosystem, so this scheduled job keeps the dev
+# dependencies in the rockspec current: it resolves each rock to its latest
+# version, pins it in the rockspec, and opens a PR when something changed.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.1 and LuaRocks
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      - uses: leafo/gh-actions-luarocks@v4
+
+      - name: Bump rockspec dependencies to latest
+        env:
+          ROCKSPEC: pluginupdater-dev-0.0.1-1.rockspec
+          LR_TREE: /tmp/luarocks-bump
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+
+          rockspec = os.environ["ROCKSPEC"]
+          tree = os.environ["LR_TREE"]
+          with open(rockspec) as f:
+              text = f.read()
+
+          m = re.search(r"dependencies\s*=\s*\{(.*?)\}", text, re.S)
+          if not m:
+              raise SystemExit("no dependencies block found in " + rockspec)
+          block = m.group(1)
+
+          out, changed = [], False
+          for line in block.splitlines():
+              mm = re.match(r'^(\s*)"((?:[^"\\]|\\.)*)"(\s*,?)\s*$', line)
+              if not mm:
+                  out.append(line)
+                  continue
+              indent, spec, comma = mm.group(1), mm.group(2), mm.group(3)
+              name = spec.split()[0]  # rock name, ignoring any existing version
+              subprocess.run(
+                  ["luarocks", "install", "--tree", tree, name],
+                  check=True, capture_output=True,
+              )
+              version = subprocess.run(
+                  ["luarocks", "show", "--tree", tree, name, "version"],
+                  capture_output=True, text=True,
+              ).stdout.strip()
+              new_spec = f"{name} {version}"
+              out.append(f'{indent}"{new_spec}"{comma}')
+              if spec != new_spec:
+                  changed = True
+                  print(f"bumped {name}: {spec!r} -> {new_spec!r}")
+
+          if not changed:
+              print("No LuaRocks dependency updates available.")
+              with open(os.environ["GITHUB_ENV"], "a") as env:
+                  env.write("NOCHANGE=true\n")
+          else:
+              new_block = "\n".join(out)
+              text = text[:m.start(1)] + new_block + text[m.end(1):]
+              with open(rockspec, "w") as f:
+                  f.write(text)
+          PY
+
+      - name: Create Pull Request
+        if: ${{ !env.NOCHANGE }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "Bump LuaRocks dev dependencies"
+          title: "Bump LuaRocks dev dependencies"
+          body: |
+            Automated update of the LuaRocks dev dependencies in the rockspec to
+            their latest available versions (Dependabot has no LuaRocks ecosystem).
+          branch: bump-luarocks-deps
+          delete-branch: true
