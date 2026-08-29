@@ -1,5 +1,8 @@
 # Plugin Updater
 
+![Tests](https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/test.yml/badge.svg)
+![Lua](https://img.shields.io/badge/Lua-5.1%20%2F%20LuaJIT-blue)
+
 A Renoise tool that scans the current song for **outdated or broken plugin
 devices** (track FX chains and instrument plugins), finds the best installed
 candidate, and upgrades them while trying to preserve the previous preset/state.
@@ -27,8 +30,13 @@ candidate, and upgrades them while trying to preserve the previous preset/state.
    directly; (b) if the formats differ, load a same-named factory preset as a
    base and overlay the old plugin's captured parameter values (matched by
    name); (c) if no transfer method succeeds, keep the new plugin at default
-   state — strictly better than a missing plugin. The device enabled/bypass
-   flag is preserved.
+    state — strictly better than a missing plugin. The device enabled/bypass
+    flag is preserved.
+  - **Automation is preserved.** Plugin automation (track-device and instrument)
+    is carried across the replacement, matched by parameter name: track devices
+    rebind their live automation objects onto the new device, and instrument
+    plugins rebuild it from the captured point data. All of this is best-effort
+    and fully `pcall`-guarded, so a failure never aborts the upgrade.
 4. **Per-row UI + live refresh.** Shows a grid with the current plugin, a
    "Replace with" dropdown of candidates (auto-selecting the best upgrade), and
    a result column. The dialog watches the song and re-scans (reusing the cached
@@ -81,6 +89,22 @@ candidate, and upgrades them while trying to preserve the previous preset/state.
 - **Cross-format upgrades** carry state via captured parameter values matched
   by name; parameters the new plugin doesn't expose (or that aren't automatable)
   are dropped.
+
+## Testing
+
+The pure logic that can be verified without a live Renoise session has a
+dependency-free Lua test suite (`tests/run.lua`) and a CI workflow
+(`.github/workflows/test.yml`) that installs Lua 5.1 (matching Renoise's
+LuaJIT), compile-checks every source file, and runs the suite:
+
+    lua5.1 tests/run.lua
+
+It covers plugin-name analysis, candidate matching (exact and version/name-flexible
+— including `Kick - Nicky Romero` → `Kick 2`, `Reaktor5` → `Reaktor6`, and
+`FabFilter FF Pro MB` → `FabFilter Pro-MB`), preset-name extraction, `Song.xml`
+recovery (against a zipped fixture), and the inventory scan wired to a mocked
+song. Swap/state-transfer behavior that needs the Renoise runtime is still
+verified manually per the checklist below.
 
 ## Installation
 
