@@ -24,3 +24,8 @@ ignore = {
   "542", -- empty if branch
   "631", -- line too long
 }
+
+-- Vendored third-party library; not part of this project's code.
+exclude_files = {
+  "lib/LibDeflate.lua",
+}
