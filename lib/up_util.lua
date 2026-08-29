@@ -71,7 +71,7 @@ function up_util.token_set(s)
   t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
   t = t:gsub("%s+", " ")
   local set = {}
-  for tok in t:gmatch("[%w%.%-]+") do
+  for tok in t:gmatch("[%w%.]+") do
     local w = tok:gsub("[%.%-]", "")
     if #w > 0 then set[w] = true end
   end
