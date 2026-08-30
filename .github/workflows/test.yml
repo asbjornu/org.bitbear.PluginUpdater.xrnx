@@ -1,0 +1,49 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, renoise/3.5.4]
+  pull_request:
+
+jobs:
+  lua:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Lua 5.1 (matches Renoise's LuaJIT)
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+
+      - name: Install LuaRocks
+        uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install dev dependencies from rockspec
+        run: luarocks install --deps-only ./pluginupdater-dev-0.0.1-1.rockspec
+
+      - name: Lua version
+        run: lua -v
+
+      - name: Compile-check all sources
+        run: |
+          set -e
+          for f in main.lua lib/*.lua; do
+            echo "checking $f"
+            lua -e "assert(loadfile('$f'))"
+          done
+
+      - name: Run test suite with coverage
+        run: lua -lluacov tests/run.lua
+
+      - name: Generate lcov coverage report
+        run: luacov -r lcov
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.lcov
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

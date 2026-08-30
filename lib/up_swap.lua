@@ -30,7 +30,7 @@ local function dump_synth_outcome(old_params, new_dev)
   local ok_p, params = pcall(function() return new_dev.parameters end)
   if not ok_p or not params then return end
   local by_name = {}
-  for i, p in ipairs(params) do
+  for _, p in ipairs(params) do
     local okn, n = pcall(function() return p.name end)
     if okn and type(n) == "string" and n ~= "" then by_name[n] = p end
   end
@@ -56,7 +56,7 @@ local function snapshot_params(device)
   if not device then return out end
   local ok, params = pcall(function() return device.parameters end)
   if not ok or not params then return out end
-  for i, p in ipairs(params) do
+  for _, p in ipairs(params) do
     local okv, v = pcall(function() return p.value end)
     if okv then
       local okn, n = pcall(function() return p.name end)

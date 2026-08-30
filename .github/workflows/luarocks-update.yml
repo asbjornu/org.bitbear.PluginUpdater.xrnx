@@ -1,0 +1,120 @@
+name: Update dependencies
+
+# Dependabot has no LuaRocks ecosystem, so this scheduled job keeps two things
+# current and opens a PR when either changes:
+#   1. The LuaRocks dev dependencies pinned in the rockspec.
+#   2. The vendored pure-Lua zip library (LibDeflate) used by up_zip.lua to read
+#      .xrns song archives without a system `unzip` binary. The vendored copy in
+#      lib/LibDeflate.lua is refreshed from its upstream master branch.
+
+on:
+  schedule:
+    - cron: "17 6 * * 1" # weekly, Monday
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lua 5.1 and LuaRocks
+        uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1"
+      - uses: leafo/gh-actions-luarocks@v4
+
+      - name: Bump rockspec dependencies to latest
+        env:
+          ROCKSPEC: pluginupdater-dev-0.0.1-1.rockspec
+          LR_TREE: /tmp/luarocks-bump
+        run: |
+          python3 - <<'PY'
+          import os, re, subprocess
+
+          rockspec = os.environ["ROCKSPEC"]
+          tree = os.environ["LR_TREE"]
+          with open(rockspec) as f:
+              text = f.read()
+
+          m = re.search(r"dependencies\s*=\s*\{(.*?)\}", text, re.S)
+          if not m:
+              raise SystemExit("no dependencies block found in " + rockspec)
+          block = m.group(1)
+
+          out, changed = [], False
+          for line in block.splitlines():
+              mm = re.match(r'^(\s*)"((?:[^"\\]|\\.)*)"(\s*,?)\s*$', line)
+              if not mm:
+                  out.append(line)
+                  continue
+              indent, spec, comma = mm.group(1), mm.group(2), mm.group(3)
+              name = spec.split()[0]  # rock name, ignoring any existing version
+              subprocess.run(
+                  ["luarocks", "install", "--tree", tree, name],
+                  check=True, capture_output=True,
+              )
+              listed = subprocess.run(
+                  ["luarocks", "list", "--porcelain", name, "--tree", tree],
+                  capture_output=True, text=True,
+              ).stdout.strip()
+              version = ""
+              for line in listed.splitlines():
+                  parts = line.split("\t")
+                  if parts and parts[0] == name and len(parts) >= 2:
+                      version = parts[1]
+                      break
+              new_spec = f"{name} {version}"
+              out.append(f'{indent}"{new_spec}"{comma}')
+              if spec != new_spec:
+                  changed = True
+                  print(f"bumped {name}: {spec!r} -> {new_spec!r}")
+
+          if changed:
+              new_block = "\n".join(out)
+              text = text[:m.start(1)] + new_block + text[m.end(1):]
+              with open(rockspec, "w") as f:
+                  f.write(text)
+              with open(os.environ["GITHUB_ENV"], "a") as env:
+                  env.write("CHANGED=true\n")
+          else:
+              print("No LuaRocks dependency updates available.")
+          PY
+
+      - name: Update vendored LibDeflate
+        run: |
+          # Pinned to a specific upstream commit rather than the moving `master`
+          # branch, so the scheduled job cannot silently import unreviewed
+          # upstream changes (supply-chain safety). Bump this SHA intentionally
+          # when a LibDeflate update is wanted.
+          url="https://raw.githubusercontent.com/SafeteeWoW/LibDeflate/afc3b78d12fb3bcfa6b21e5332031ad3d7572e19/LibDeflate.lua"
+          tmp="$(mktemp)"
+          curl -fsSL "$url" -o "$tmp"
+          if ! cmp -s "$tmp" lib/LibDeflate.lua; then
+            cp "$tmp" lib/LibDeflate.lua
+            echo "CHANGED=true" >> "$GITHUB_ENV"
+            echo "Updated vendored LibDeflate to pinned commit afc3b78."
+          else
+            echo "LibDeflate already up to date."
+          fi
+          rm -f "$tmp"
+
+      - name: Create Pull Request
+        if: ${{ env.CHANGED == 'true' }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "Bump dependencies (LuaRocks dev deps and/or vendored LibDeflate)"
+          title: "Bump dependencies"
+          body: |
+            Automated dependency updates:
+            - LuaRocks dev dependencies in the rockspec (Dependabot has no LuaRocks ecosystem), and/or
+            - the vendored pure-Lua `LibDeflate` library refreshed from upstream.
+
+            The test suite exercises `up_zip` (which uses LibDeflate), so this PR's
+            checks will catch a regressing LibDeflate update.
+          branch: bump-dependencies
+          delete-branch: true

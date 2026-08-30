@@ -1,0 +1,58 @@
+name: Build
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Lua 5.1 and LuaJIT
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y lua5.1 luajit
+        sudo ln -sf /usr/bin/luac5.1 /usr/local/bin/luac
+        luac -v
+        luajit -v
+    - name: LuaJIT syntax check
+      run: find "$(pwd)" -name '*.lua' -type f -print0 | while IFS= read -r -d '' f; do luajit -bl "$f" > /dev/null || exit 1; done
+
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install LuaJIT
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y luajit
+        luajit -v
+    - name: luajit
+      run: find "$(pwd)" -name '*.lua' -type f -print0 | while IFS= read -r -d '' f; do luajit -bl "$f" > /dev/null || exit 1; done
+
+  luacheck:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Lua 5.1 and LuaRocks
+      uses: leafo/gh-actions-lua@v10
+      with:
+        luaVersion: "5.1"
+    - uses: leafo/gh-actions-luarocks@v4
+    - name: Install luacheck
+      run: luarocks install luacheck
+    - name: luacheck
+      # Exclude the `.luarocks` toolchain tree that gh-actions-luarocks
+      # materialises, and the vendored LibDeflate.lua, which aren't ours to lint.
+      run: luacheck . --exclude-files '.luarocks' --exclude-files 'lib/LibDeflate.lua'
+
+  xml:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install xmllint
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libxml2-utils
+        xmllint --version
+    - name: Validate XML
+      run: git ls-files '*.xml' | while IFS= read -r f; do xmllint --noout "$f" || exit 1; done
