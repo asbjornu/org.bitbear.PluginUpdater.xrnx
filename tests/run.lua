@@ -32,7 +32,8 @@ end
 src = src:gsub("/%./", "/")
 local root = src:match("(.*)/tests/run%.lua$")
 if not root or root == "" then root = "." end
-package.path = (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
+package.path = (root == "." and "" or root .. "/") .. "?.lua;"
+  .. (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
 
 -- Renoise runs tool Lua in strict mode: reading *or writing* any undeclared
 -- global is a hard error. The suite must fail the same way, otherwise
@@ -64,8 +65,91 @@ rawset(_G, "arg", false)
 -- Mock the Renoise global. The fixture path is resolved from the script location
 -- so the suite runs regardless of the current working directory.
 local fixture = root .. "/tests/fixtures/sample.xrns"
+
+-- Minimal observable stub: records notifiers so tests can manually "fire" them
+-- (Renoise drives these on the app-idle / document events; headless we pump them).
+local function observable()
+  local nots = {}
+  return {
+    add_notifier = function(_, fn) nots[fn] = true end,
+    remove_notifier = function(_, fn) nots[fn] = nil end,
+    _fire = function()
+      -- Snapshot keys so notifiers can safely remove themselves during callbacks.
+      local fns = {}
+      for fn in pairs(nots) do fns[#fns + 1] = fn end
+      for _, fn in ipairs(fns) do
+        if nots[fn] then fn() end
+      end
+    end,
+  }
+end
+
+-- Chainable ViewBuilder stub. Every constructor returns a control object with
+-- just the fields/methods up_ui actually touches (height, value, items, active,
+-- text, add_child/remove_child), so the UI code runs without a real GUI.
+local function control(attrs)
+  attrs = attrs or {}
+  local c = {}
+  for k, v in pairs(attrs) do c[k] = v end
+  c._children = {}
+  c.height = c.height or 20
+  function c:add_child(child) table.insert(self._children, child) end
+  function c:remove_child(child)
+    for i = #self._children, 1, -1 do
+      if self._children[i] == child then table.remove(self._children, i); break end
+    end
+  end
+  return c
+end
+local vb = setmetatable({}, {
+  -- `renoise.ViewBuilder()` yields the factory itself; its methods (`:row`,
+  -- `:text`, ...) are what create individual controls.
+  __call = function(self) return self end,
+  -- Each constructor is invoked as `vb:row{...}` -> row(vb, attrs); swallow the
+  -- self argument and build the control from the real attrs table.
+  __index = function(_, k)
+    if k == "DEFAULT_CONTROL_HEIGHT" then return 20 end
+    return function(_, attrs) return control(attrs) end
+  end,
+})
+
+-- A mock song with a couple of devices, mirroring the inventory scan fixture.
+local ui_song = {
+  instruments = {
+    { name = "Sampler", plugin_properties = { plugin_loaded = false, plugin_device = nil } },
+    { name = "Dark Dreams 2", plugin_properties = { plugin_loaded = false, plugin_device = nil } },
+    { name = "Healthy", plugin_properties = { plugin_loaded = true, plugin_device = {
+        device_path = "/P/ProMB.vst3", name = "VST3: FabFilter Pro-MB",
+        active_preset_data = "x", parameters = {} } } },
+  },
+  tracks = {
+    { name = "Master", devices = {
+        [1] = { name = "Mixer" },
+        [2] = { name = "VST3: FabFilter Pro-MB", device_path = "/P/ProMB.vst3",
+                 active_preset_data = "x", parameters = {} } } },
+  },
+}
+
+-- renoise.tool() must return the SAME object on every call (as it does in
+-- Renoise) so the app-idle observable shared by the scan/slicer is stable.
+local tool_stub = {
+  bundle_path = root .. "/",
+  add_menu_entry = function() end,
+  add_keybinding = function() end,
+  app_idle_observable = observable(),
+  app_new_document_observable = observable(),
+  app_release_document_observable = observable(),
+}
+
 _G.renoise = {
-  app = function() return { song_filename = fixture } end,
+  app = function() return {
+    song_filename = fixture,
+    show_warning = function() end,
+    show_custom_dialog = function(_title, _content) return { visible = true } end,
+  } end,
+  song = function() return ui_song end,
+  tool = function() return tool_stub end,
+  ViewBuilder = vb,
 }
 
 local up_util      = require("up_util")
@@ -290,6 +374,78 @@ do
   check(dd and dd.analysis and dd.analysis.base:find("reaktor") ~= nil, "recovered analysis has Reaktor base")
   check(healthy and (not healthy.broken) and healthy.analysis, "healthy plugin scanned normally")
   check(track and track.is_plugin and track.analysis, "track plugin scanned")
+end
+
+-- 7. main.lua + up_ui (headless, mocked Renoise) ------------------------------
+-- These two files were previously never loaded by the suite, so Codecov counted
+-- them as 0% and dragged the project number down. Loading main.lua (which pulls
+-- in up_ui) plus exercising up_ui's pure logic and the full dialog/scan flow
+-- with mocked Renoise views gives them real coverage.
+section("main.lua loads + up_ui logic (mocked Renoise)")
+do
+  -- Loading main.lua exercises its top-level (menu/keybinding registration) and
+  -- pulls in up_ui; doing so under coverage credits the hitherto-uncovered
+  -- entry point. root/?.lua is on package.path so require resolves it through the
+  -- same instrumented searcher as the lib files.
+  local ok_main, err_main = pcall(require, "main")
+  check(ok_main, "main.lua loads under mocked renoise" .. (ok_main and "" or (": " .. tostring(err_main))))
+
+  local up_ui = require("up_ui")
+
+  -- entry_sig / old_label / auto_select_index are local helpers; they are
+  -- exercised indirectly below via fill_row/capture_selections, which call them.
+
+  local rec = { kind = "instrument", instrument_name = "Kick NR",
+    analysis = up_util.analyze_plugin(nil, "VST: Sonic Academy: Kick - Nicky Romero"),
+    device_name = "VST: Sonic Academy: Kick - Nicky Romero" }
+
+  local cands = {
+    analyze("VST3: FabFilter Pro-Q 3", "/P/Q.vst3", "VST3"),
+    analyze("VST: FabFilter Pro-MB", "/P/MB.vst", "VST"),
+  }
+
+  -- Drive the view-building + list-management logic with the ViewBuilder stub.
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._vb:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+
+  up_ui.clear_list()
+  check(up_ui._header_row ~= nil, "clear_list builds header row")
+
+  local rc = { entry = rec, candidates = cands, candidate = cands[1] }
+  up_ui._results = { rc }
+  up_ui.found_row(rec)
+  check(#up_ui._data_rows == 1, "found_row appended a data row")
+  up_ui.fill_row(rc)
+  -- fill_row internally calls the local auto_select_index; it should pick the
+  -- same-protocol (VST3) candidate, Pro-Q 3, i.e. popup value 2.
+  check(up_ui._row_views[1] and up_ui._row_views[1].popup.value == 2,
+    "fill_row auto-selected the same-protocol candidate (Pro-Q 3)")
+
+  up_ui.recompute_visible()
+  check(up_ui._visible >= 1, "recompute_visible computed a visible count")
+  up_ui.refresh_scroll()
+  up_ui.apply_scroll()
+  check(true, "refresh_scroll/apply_scroll run without error")
+
+  check(up_ui.wheel_scroll({ type = "wheel", direction = "down" }) == nil, "wheel_scroll handles wheel")
+  check(up_ui.wheel_scroll({ type = "other" }).type == "other", "wheel_scroll passes non-wheel through")
+
+  up_ui._saved_sel = up_ui.capture_selections()
+  check(type(up_ui._saved_sel) == "table", "capture_selections returns a table")
+  check(up_ui.summary():find("Done") == 1, "summary returns a Done. string")
+
+  -- Exercise the full dialog + scan flow; the slicer is driven manually via the
+  -- app-idle observable, since there is no real GUI event loop headlessly.
+  local ok_dlg, err_dlg = pcall(function()
+    up_ui.show_dialog()
+    local idle = _G.renoise.tool().app_idle_observable
+    for _ = 1, 400 do idle._fire() end
+    up_ui.stop_all()
+  end)
+  check(ok_dlg, "show_dialog + scan flow runs headlessly" .. (ok_dlg and "" or (": " .. tostring(err_dlg))))
 end
 
 -- ---------------------------------------------------------------------------
