@@ -17,7 +17,7 @@ local up_zip = require("up_zip")
 
 local _cache = { file = nil, data = nil }
 
-local function read_song_xml(song)
+local function read_song_xml(_song)
   local ok_app, app = pcall(function() return renoise.app() end)
   if not ok_app or not app then
     return nil

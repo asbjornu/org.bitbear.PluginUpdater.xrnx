@@ -41,7 +41,9 @@ jobs:
     - name: Install luacheck
       run: luarocks install luacheck
     - name: luacheck
-      run: luacheck .
+      # Exclude the `.luarocks` toolchain tree that gh-actions-luarocks
+      # materialises, and the vendored LibDeflate.lua, which aren't ours to lint.
+      run: luacheck . --exclude-files '.luarocks' --exclude-files 'lib/LibDeflate.lua'
 
   xml:
     runs-on: ubuntu-latest

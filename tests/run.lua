@@ -69,9 +69,9 @@ local up_matching  = require("up_matching")
 local up_preset    = require("up_preset")
 local up_songxml   = require("up_songxml")
 local up_inventory = require("up_inventory")
-local up_core      = require("up_core") -- loaded so its module is counted in coverage
+local up_core      = require("up_core") -- luacheck: ignore (loaded so its module is counted in coverage)
 local up_zip       = require("up_zip")
-local up_slicer    = require("up_slicer") -- pure logic; safe to load headlessly
+local up_slicer    = require("up_slicer") -- luacheck: ignore (pure logic; safe to load headlessly)
 
 local failures = 0
 local function check(cond, msg)
