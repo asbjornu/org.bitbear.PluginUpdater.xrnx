@@ -159,6 +159,7 @@ local up_songxml   = require("up_songxml")
 local up_inventory = require("up_inventory")
 local up_core      = require("up_core") -- luacheck: ignore (loaded so its module is counted in coverage)
 local up_zip       = require("up_zip")
+local up_swap      = require("up_swap")
 local up_slicer    = require("up_slicer") -- luacheck: ignore (pure logic; safe to load headlessly)
 
 local failures = 0
@@ -266,6 +267,41 @@ do
   check(up_preset.extract_name(dev2) == "MyPatch", "falls back to <PresetName> in chunk")
 
   check(up_preset.extract_name(nil) == nil, "nil device -> nil")
+
+  -- Reaktor/Kontakt embed the loaded ensemble as a "file://.../Name.ext" string
+  -- inside the opaque preset blob. Renoise returns it as the raw binary at
+  -- runtime, and as base64-encoded CDATA in some code paths. The last path
+  -- component minus its extension is the preset/ensemble name.
+  local raw = "\000\000file://localhost/Users/Shared/Razor/Razor.rkplr\000\000"
+  check(up_preset.extract_name({ active_preset_data = raw }) == "Razor",
+    "extracts ensemble name from raw blob (file:// URL)")
+  local razor_b64 = "AABmaWxlOi8vbG9jYWxob3N0L1VzZXJzL1NoYXJlZC9SYXpvci9SYXpvci5ya3Bscg" ..
+    "AA"
+  check(up_preset.extract_name({ active_preset_data = razor_b64 }) == "Razor",
+    "extracts ensemble name from base64 chunk (file:// URL)")
+  local legato_b64 = "AUtvbnRha3QAZmlsZTovLy9TYW1wbGVzL09yY2hlc3RyYS9MZWdhdG8ubmtp" ..
+    "AA=="
+  check(up_preset.extract_name({ active_preset_data = legato_b64 }) == "Legato",
+    "extracts ensemble name from Kontakt-style base64 chunk")
+
+  -- Secondary fallback branches inside active_preset_data.
+  check(up_preset.extract_name({ active_preset_data = "<Name>EmbeddedPatch</Name>" }) == "EmbeddedPatch",
+    "falls back to <Name> in chunk")
+  check(up_preset.extract_name({ active_preset_data = '<device name="InlineName"></device>' }) == "InlineName",
+    "falls back to name=\"...\" attribute in chunk")
+end
+
+section("up_preset._extract_chunk_name skips binary blobs before decoding")
+do
+  -- A binary active_preset_data blob (NUL bytes / non-base64 chars) can never carry a
+  -- usable file:// URL, so the cheap heuristic must reject it without the expensive
+  -- full base64 decode.
+  check(up_preset._extract_chunk_name("\000\000\001\002binaryblob\255") == nil,
+    "binary blob with NUL bytes is rejected before decoding")
+  -- Valid base64 still decodes and yields the embedded ensemble name.
+  local razor_b64 = "AABmaWxlOi8vbG9jYWxob3N0L1VzZXJzL1NoYXJlZC9SYXpvci9SYXpvci5ya3Bscg" .. "AA"
+  check(up_preset._extract_chunk_name(razor_b64) == "Razor",
+    "valid base64 chunk still yields the ensemble name")
 end
 
 -- 4. up_matching --------------------------------------------------------------
@@ -339,6 +375,20 @@ do
   local newKick = { analyze("VST: Sonic Academy: Kick 2", "/P/Kick2.vst", "VST") }
   check(#candidates_for("VST: Sonic Academy: Kick", newKick, false) == 1,
     "Kick -> Kick 2 when only the new release is installed")
+
+  -- fallback when only the live instrument name is known (no .xrns recovery, no
+  -- plugin_properties name): the name "Kick - Nicky Romero" shares the significant
+  -- product token "kick" with "Kick 2".
+  check(#candidates_for("VST: Kick - Nicky Romero ()", newKick, false) == 1,
+    "Kick - Nicky Romero (name only) -> Kick 2 via shared token")
+  -- same-product upgrade still matches on the shared product token.
+  local reaktor = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
+  check(#candidates_for("VST: Reaktor5 (Make It Bright)", reaktor, false) == 1,
+    "Reaktor5 (name only) -> Reaktor6 via shared product token")
+  -- but a DIFFERENT product must not match (no shared product token).
+  local pq = { analyze("VST3: FabFilter Pro-Q 3", "/P/ProQ3.vst3", "VST3") }
+  check(#candidates_for("VST: Reaktor5 (Make It Bright)", pq, false) == 0,
+    "Reaktor5 (name only) does NOT match Pro-Q 3 (different product)")
 end
 
 -- 4b. Instrument pool must keep VST3 plugins whose `info.path` is an opaque UID
@@ -382,29 +432,10 @@ do
   for _, a in ipairs(pool) do names[a.name] = true end
   check(names["Native Instruments: Reaktor 6"], "AU 'Native Instruments: Reaktor 6' kept in pool")
   check(names["Reaktor 6"], "VST3 'Reaktor 6' kept in pool")
-   local cands = up_matching.find_candidates(pool,
-     { analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
-   check(#cands >= 1 and cands[1].name:find("Reaktor 6") ~= nil,
-     "Reaktor 5 -> Reaktor 6 offered as upgrade")
-end
-
--- 4c2. available_plugin_infos entries without a loadable path (path nil or "")
--- must be skipped: they cannot be loaded and would otherwise surface as pool
--- candidates whose .path later blows up in pp:load_plugin / insert_device_at.
-section("up_matching.build_instrument_pool skips entries without a path")
-do
-  local good = { path = "/P/ProQ3.vst3", name = "FabFilter Pro-Q 3" }
-  local nil_path = { path = nil, name = "Ghost Plugin" }
-  local empty_path = { path = "", name = "Also Ghost" }
-  local mock_song = {
-    instruments = {
-      { plugin_properties = { available_plugin_infos = { good, nil_path, empty_path } } },
-    },
-  }
-  local pool = up_matching.build_instrument_pool(mock_song, nil, nil)
-  check(#pool == 1, "only the entry with a real path is pooled (nil/empty dropped)")
-  check(pool[1] and pool[1].path == "/P/ProQ3.vst3",
-    "pooled entry keeps its valid path as the load handle")
+  local cands = up_matching.find_candidates(pool,
+    { analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
+  check(#cands >= 1 and cands[1].name:find("Reaktor 6") ~= nil,
+    "Reaktor 5 -> Reaktor 6 offered as upgrade")
 end
 
 -- 5. up_songxml ---------------------------------------------------------------
@@ -435,10 +466,367 @@ end
 
 section("up_songxml.recover (real zipped fixture)")
 do
+  -- read_song_xml reads the song path from song().file_name (the real Renoise
+  -- property). This previously used non-existent app.song_filename /
+  -- song().song_filename, which left recovery empty and dropped every missing
+  -- plugin whose instrument name carried no protocol token.
+  local info = up_songxml.recover({ file_name = fixture })
+  check(info[2] and info[2].display_name == "AU: Native Instruments: Reaktor5",
+    "recover() parses the .xrns fixture via song.file_name")
+  check(info[3] and info[3].instrument_name == "Kick NR", "recover() reads instrument <Name>")
+end
+
+section("up_songxml.recover falls back to app.song_filename")
+do
   local info = up_songxml.recover({})
   check(info[2] and info[2].display_name == "AU: Native Instruments: Reaktor5",
-    "recover() parses the .xrns fixture")
-  check(info[3] and info[3].instrument_name == "Kick NR", "recover() reads instrument <Name>")
+    "recover() still works via app.song_filename fallback")
+end
+
+section("up_songxml.parse_instruments (attributes, groups, name keys)")
+do
+  -- Mirrors a real song: a non-plugin (ext. MIDI) instrument, then a plugin
+  -- instrument nested in an <InstrumentGroup>, with attribute-bearing tags.
+  local xml = [[<?xml version="1.0"?>
+<Song>
+  <Instrument>
+    <Name>MIDI In</Name>
+    <InstrumentType>ext. MIDI</InstrumentType>
+  </Instrument>
+  <InstrumentGroup>
+    <Instrument>
+      <Name>VST: Kick - Nicky Romero ()</Name>
+      <PluginGenerator><PluginDevice>
+        <PluginType>VST</PluginType>
+        <PluginIdentifier>Kick - Nicky Romero</PluginIdentifier>
+        <PluginDisplayName>VST: Sonic Academy: Kick - Nicky Romero</PluginDisplayName>
+      </PluginDevice></PluginGenerator>
+    </Instrument>
+  </InstrumentGroup>
+</Song>]]
+  local info = up_songxml.parse_instruments(xml)
+  check(info[1] == nil, "non-plugin (MIDI) instrument skipped")
+  check(info[2] and info[2].display_name == "VST: Sonic Academy: Kick - Nicky Romero",
+    "plugin inside InstrumentGroup still indexed (idx 2)")
+  -- Name-keyed lookups must resolve regardless of index alignment.
+  check(info["VST: Kick - Nicky Romero ()"]
+    and info["VST: Kick - Nicky Romero ()"].display_name == "VST: Sonic Academy: Kick - Nicky Romero",
+    "recoverable by live instrument name (index-independent)")
+  check(info["VST: Sonic Academy: Kick - Nicky Romero"]
+    and info["VST: Sonic Academy: Kick - Nicky Romero"].display_name == "VST: Sonic Academy: Kick - Nicky Romero",
+    "recoverable by plugin display name")
+end
+
+section("up_songxml.parse_instruments recovers Reaktor ensemble (preset) from chunk")
+do
+  -- Reaktor/Kontakt embed the loaded ensemble as a base64 "file://.../Name.ext"
+  -- inside the opaque ParameterChunk. Renoise exposes that name nowhere on the
+  -- live API once the plugin fails to load, so it must be lifted from Song.xml.
+  local chunk = "cHJlZml4AGZpbGU6Ly8vVXNlcnMvU2hhcmVkL1Jhem9yL1Jhem9yLnJrcGxyAHN1ZmZpeA=="
+  local xml = '<?xml version="1.0"?>\n<Song>\n<Instrument>\n<Name>Dark Dreams 1</Name>\n'
+    .. '<PluginGenerator><PluginDevice>\n<PluginType>AU</PluginType>\n'
+    .. '<PluginIdentifier>aumu:NiR5:-NI-</PluginIdentifier>\n'
+    .. '<PluginDisplayName>AU: Native Instruments: Reaktor5</PluginDisplayName>\n'
+    .. '<ParameterChunk><![CDATA[' .. chunk .. ']]></ParameterChunk>\n'
+    .. '</PluginDevice></PluginGenerator>\n</Instrument>\n</Song>'
+  local info = up_songxml.parse_instruments(xml)
+  check(info[1] and info[1].preset_name == "Razor",
+    "loaded Reaktor ensemble recovered from ParameterChunk (Razor)")
+  check(info["Dark Dreams 1"] and info["Dark Dreams 1"].preset_name == "Razor",
+    "preset recoverable by live instrument name")
+end
+
+section("up_songxml.parse_instruments keeps every instrument inside a group")
+do
+  -- Regression: <InstrumentGroup> must not swallow the first inner <Instrument>
+  -- (the old pattern matched the group as an instrument open and consumed it).
+  local xml = [[<?xml version="1.0"?>
+<Song>
+  <InstrumentGroup>
+    <Instrument>
+      <Name>VST: Kick - Nicky Romero ()</Name>
+      <PluginGenerator><PluginDevice>
+        <PluginType>VST</PluginType>
+        <PluginIdentifier>Kick - Nicky Romero</PluginIdentifier>
+        <PluginDisplayName>VST: Sonic Academy: Kick - Nicky Romero</PluginDisplayName>
+      </PluginDevice></PluginGenerator>
+    </Instrument>
+    <Instrument>
+      <Name>AU: Native Instruments: Reaktor5</Name>
+      <PluginGenerator><PluginDevice>
+        <PluginType>AU</PluginType>
+        <PluginDisplayName>AU: Native Instruments: Reaktor5</PluginDisplayName>
+      </PluginDevice></PluginGenerator>
+    </Instrument>
+  </InstrumentGroup>
+  <Instrument>
+    <Name>Sampler</Name>
+    <InstrumentType>Sampler</InstrumentType>
+  </Instrument>
+</Song>]]
+  local info = up_songxml.parse_instruments(xml)
+  check(info[1] and info[1].display_name == "VST: Sonic Academy: Kick - Nicky Romero",
+    "first grouped instrument kept (idx 1)")
+  check(info[2] and info[2].display_name == "AU: Native Instruments: Reaktor5",
+    "second grouped instrument kept (idx 2, not dropped)")
+  check(info["AU: Native Instruments: Reaktor5"],
+    "second grouped instrument found by live instrument name")
+end
+
+section("up_songxml.parse_instruments recovers preset from attributed/indented chunk")
+do
+  -- Regression: a real ParameterChunk may carry attributes and leading whitespace
+  -- before the CDATA, which the strict match previously failed to recover.
+  local chunk = "cHJlZml4AGZpbGU6Ly8vVXNlcnMvU2hhcmVkL1Jhem9yL1Jhem9yLnJrcGxyAHN1ZmZpeA=="
+  local xml = '<?xml version="1.0"?>\n<Song>\n<Instrument>\n<Name>Dark Dreams 1</Name>\n'
+    .. '<PluginGenerator><PluginDevice>\n<PluginType>AU</PluginType>\n'
+    .. '<PluginDisplayName>AU: Native Instruments: Reaktor5</PluginDisplayName>\n'
+    .. '<ParameterChunk preset="Razor.rkplr">  <![CDATA[' .. chunk .. ']]></ParameterChunk>\n'
+    .. '</PluginDevice></PluginGenerator>\n</Instrument>\n</Song>'
+  local info = up_songxml.parse_instruments(xml)
+  check(info[1] and info[1].preset_name == "Razor",
+    "preset recovered from attributed/indented ParameterChunk")
+end
+
+section("up_inventory.scan surfaces missing plugin found by name")
+do
+  -- The Kick lives at live index 1, but its recovered identity sits at a
+  -- different position in Song.xml (a MIDI instrument precedes it). Name-based
+  -- lookup must still surface it as a recoverable, broken plugin.
+  local mock_song = {
+    instruments = {
+      { name = "VST: Kick - Nicky Romero ()", plugin_properties = { plugin_loaded = false, plugin_device = nil } },
+    },
+    tracks = {},
+  }
+  local recovery = {
+    [1] = nil, -- MIDI instrument (no plugin)
+    [2] = { index = 2, instrument_name = "VST: Kick - Nicky Romero ()",
+            protocol = "VST", identifier = "Kick - Nicky Romero",
+            display_name = "VST: Sonic Academy: Kick - Nicky Romero" },
+    ["VST: Kick - Nicky Romero ()"] = { index = 2, instrument_name = "VST: Kick - Nicky Romero ()",
+            protocol = "VST", identifier = "Kick - Nicky Romero",
+            display_name = "VST: Sonic Academy: Kick - Nicky Romero" },
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil, recovery)
+  local kick
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.instrument_name == "VST: Kick - Nicky Romero ()" then kick = e end
+  end
+  check(kick ~= nil, "missing Kick surfaced via name-based recovery")
+  check(kick and kick.broken and kick.recovered and kick.analysis
+    and kick.analysis.base:find("kick") ~= nil, "Kick recovered as broken plugin with analysis")
+end
+
+section("up_inventory.scan recovers missing plugin from live plugin_properties")
+do
+  -- When the .xrns can't be read, Renoise still keeps the plugin name on
+  -- plugin_properties for a missing plugin; that must surface the instrument.
+  local mock_song = {
+    instruments = {
+      { name = "VST: Kick - Nicky Romero ()", plugin_properties = {
+          plugin_loaded = false, plugin_device = nil,
+          plugin_name = "VST: Sonic Academy: Kick - Nicky Romero" } },
+    },
+    tracks = {},
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil, {})
+  local kick
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.instrument_name == "VST: Kick - Nicky Romero ()" then kick = e end
+  end
+  check(kick ~= nil, "missing Kick surfaced via live plugin_name")
+  check(kick and kick.analysis and kick.analysis.base:find("kick") ~= nil,
+    "Kick analysis derived from live plugin name")
+end
+
+section("up_inventory.scan surfaces missing plugin by instrument name (protocol token)")
+do
+  -- When no .xrns recovery and no plugin_properties name exist, a missing plugin
+  -- whose name still carries a protocol token must still be surfaced.
+  local mock_song = {
+    instruments = {
+      { name = "VST: Kick - Nicky Romero ()", plugin_properties = {
+          plugin_loaded = false, plugin_device = nil } },
+    },
+    tracks = {},
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil, {})
+  local kick
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.instrument_name == "VST: Kick - Nicky Romero ()" then kick = e end
+  end
+  check(kick ~= nil, "missing Kick surfaced via instrument name")
+  check(kick and kick.device_name == "VST: Kick - Nicky Romero ()", "surfaced with its name as identity")
+end
+
+section("up_inventory.scan recovers missing AU plugin from song.xml (placeholder path)")
+do
+  -- When a plugin fails to load, Renoise may keep a placeholder device whose
+  -- device_path is an opaque AU 4-char code and whose name is blank. Trusting
+  -- that path misidentifies the plugin (e.g. Reaktor5 -> base "ni") so it gets
+  -- no candidate and is effectively "not added". The saved song's authoritative
+  -- display name + ensemble must win instead.
+  local mock_song = {
+    instruments = {
+      { name = "Dark Dreams 1", plugin_properties = {
+          plugin_loaded = false,
+          plugin_device = { device_path = "aumu:NiR5:-NI-", name = nil } } },
+    },
+    tracks = {},
+  }
+  local recovery = {
+    [1] = { index = 1, instrument_name = "Dark Dreams 1",
+            protocol = "AU", identifier = "aumu:NiR5:-NI-",
+            display_name = "AU: Native Instruments: Reaktor5",
+            preset_name = "Razor" },
+    ["Dark Dreams 1"] = { index = 1, instrument_name = "Dark Dreams 1",
+            protocol = "AU", identifier = "aumu:NiR5:-NI-",
+            display_name = "AU: Native Instruments: Reaktor5",
+            preset_name = "Razor" },
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil, recovery)
+  local dd
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.instrument_name == "Dark Dreams 1" then dd = e end
+  end
+  check(dd ~= nil, "missing AU Reaktor surfaced (not dropped)")
+  check(dd and dd.analysis and dd.analysis.base:find("reaktor") ~= nil,
+    "recovered from song.xml as Reaktor5 (not the opaque 'aumu:NiR5' path)")
+  check(dd and dd.active_preset_name == "Razor",
+    "loaded Reaktor ensemble ('Razor') recovered as preset name")
+  check(dd and dd.recovered and dd.broken, "marked recovered + broken")
+end
+
+section("up_swap.swap_instrument handles missing (unloaded) plugin")
+do
+  -- A missing plugin has no live device, so captured_auto would be nil; this must
+  -- not crash on pairs(nil) in restore_automation_data.
+  local new_dev = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+  local pp = {
+    plugin_loaded = false,
+    plugin_device = nil,
+    load_plugin = function(self)
+      self.plugin_device = new_dev
+      return true
+    end,
+  }
+  local song = { instruments = { { plugin_properties = pp } }, automation = function() return nil end }
+  local rec = {
+    kind = "instrument", instrument_index = 1, broken = true, plugin_loaded = false,
+    instrument_name = "VST: Kick - Nicky Romero ()", analysis = { protocol = "VST" }, device_path = nil,
+  }
+  local candidate = { path = "/P/Kick2.vst" }
+  local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
+  if not ok then print("SWAP ERROR:", tostring(res)) end
+  check(ok, "swap_instrument does not crash on a missing plugin")
+  check(ok and res and res.status ~= nil, "swap_instrument returns a status for a missing plugin")
+end
+
+section("up_swap.swap_instrument skips an already-current plugin")
+do
+  -- When the auto-selected candidate is the plugin already loaded at an instrument,
+  -- reloading it via load_plugin is wasted work and, for heavy synths, can exceed
+  -- Renoise's script-time budget and trip the "script busy" watchdog. The swap
+  -- must be skipped (status up-to-date) instead of reloading the same plugin.
+  local captured_count = 0
+  local new_dev = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+  local pp = {
+    plugin_loaded = true,
+    plugin_device = new_dev,
+    load_plugin = function(self, _path)
+      captured_count = captured_count + 1
+      self.plugin_device = new_dev
+      return true
+    end,
+  }
+  local song = { instruments = { { plugin_properties = pp } }, automation = function() return nil end }
+  local rec = {
+    kind = "instrument", instrument_index = 1, broken = false, plugin_loaded = true,
+    instrument_name = "LD SidMon", analysis = { protocol = "VST" }, device_path = "/P/Sylenth1.vst",
+  }
+  local candidate = { path = "/P/Sylenth1.vst" }
+  local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
+  check(ok, "swap_instrument handles an already-current plugin")
+  check(ok and res and res.status == "up-to-date", "already-current plugin is skipped (no reload)")
+  check(captured_count == 0, "load_plugin was NOT called for an already-current plugin")
+end
+
+section("up_swap.swap_instrument uses parenthetical label as preset for broken plugins")
+do
+  -- For a missing/recovered plugin named "VST: Reaktor5 (Make It Bright)", the
+  -- parenthetical is the real preset; it must be extracted (not the full identity)
+  -- so it can match a factory preset on the replacement plugin.
+  local new_dev = {
+    is_active = true, active_preset_data = "", presets = { "Make It Bright", "Other" }, parameters = {} }
+  local pp = {
+    plugin_loaded = false, plugin_device = nil,
+    load_plugin = function(self, _path) self.plugin_device = new_dev; return true end,
+  }
+  local song = { instruments = { { plugin_properties = pp } }, automation = function() return nil end }
+  local rec = { kind = "instrument", instrument_index = 1, broken = true, plugin_loaded = false,
+    instrument_name = "VST: Reaktor5 (Make It Bright)", analysis = { protocol = "VST" }, device_path = nil }
+  local candidate = { path = "/P/Reaktor6.vst", protocol = "VST" }
+  local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
+  check(ok and res and res.status == "upgraded-name-matched-preset",
+    "broken plugin's parenthetical preset name matches a factory preset")
+end
+
+section("up_swap.swap_instrument ignores an empty () in a broken instrument name")
+do
+  -- Renoise appends an empty "()" to some broken instrument names. The empty
+  -- parenthetical must NOT be kept as a (truthy) preset name; the full name
+  -- should fall through as the preset instead.
+  local new_dev = {
+    is_active = true, active_preset_data = "", presets = { "My Song ()", "Other" }, parameters = {} }
+  local pp = {
+    plugin_loaded = false, plugin_device = nil,
+    load_plugin = function(self, _path) self.plugin_device = new_dev; return true end,
+  }
+  local song = { instruments = { { plugin_properties = pp } }, automation = function() return nil end }
+  local rec = { kind = "instrument", instrument_index = 1, broken = true, plugin_loaded = false,
+    instrument_name = "My Song ()", analysis = { protocol = "VST" }, device_path = nil }
+  local candidate = { path = "/P/Reaktor6.vst", protocol = "VST" }
+  local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
+  check(ok and res and res.status == "upgraded-name-matched-preset",
+    "empty parenthetical does not shadow the real preset name")
+end
+
+section("upgrade reinspection yields across ticks (no watchdog stall)")
+do
+  -- Regression for the post-upgrade "script busy" stall: the per-row reinspection
+  -- used to run as one synchronous block inside on_done, re-reading every preset
+  -- chunk at once. It now lives in the coroutine and yields between rows, so the
+  -- work is spread across idle ticks instead of tripping Renoise's time budget.
+  local obs = {
+    _fn = nil,
+    add_notifier = function(self, f) self._fn = f end,
+    remove_notifier = function(self) self._fn = nil end,
+    _fire = function(self) if self._fn then self._fn() end end,
+  }
+  local real_tool = _G.renoise.tool
+  _G.renoise.tool = function()
+    return {
+      bundle_path = "", app_idle_observable = obs,
+      app_new_document_observable = { add_notifier = function() end, remove_notifier = function() end },
+      app_release_document_observable = { add_notifier = function() end, remove_notifier = function() end },
+    }
+  end
+  local phase2 = {}
+  local done = false
+  up_slicer.run(
+    function()
+      for _ = 1, 3 do coroutine.yield() end          -- upgrade loop
+      for i = 1, 4 do table.insert(phase2, i); coroutine.yield() end  -- reinspection loop
+    end,
+    function() done = true end,
+    function() return false end)
+  local ticks = 0
+  while obs._fn and ticks < 100 do obs:_fire(); ticks = ticks + 1 end
+  check(#phase2 == 4, "reinspection phase ran all iterations inside the coroutine")
+  check(done, "the coroutine completed and on_done fired")
+  check(ticks > 1, "work was spread over multiple idle ticks (yields), not one block")
+  _G.renoise.tool = real_tool
 end
 
 section("up_zip.extract (pure-Lua zip reader)")
@@ -482,6 +870,68 @@ do
   check(dd and dd.analysis and dd.analysis.base:find("reaktor") ~= nil, "recovered analysis has Reaktor base")
   check(healthy and (not healthy.broken) and healthy.analysis, "healthy plugin scanned normally")
   check(track and track.is_plugin and track.analysis, "track plugin scanned")
+end
+
+section("up_inventory.scan recovers missing plugins via song.file_name")
+do
+  -- End-to-end regression for the "not all Reaktor devices are added" bug: with
+  -- the wrong song-filename property, recovery came back empty and every missing
+  -- plugin whose instrument name carried no protocol token (e.g. "Dark Dreams 1")
+  -- was dropped. Scanning with song.file_name set must surface them.
+  local xml = up_zip.extract(fixture, "Song.xml")
+  local recovery = up_songxml.parse_instruments(xml)
+  local instruments = {}
+  for _, e in pairs(recovery) do
+    if type(e) == "table" then
+      instruments[e.index] = { name = e.instrument_name,
+        plugin_properties = { plugin_loaded = false, plugin_device = nil } }
+    end
+  end
+  local maxi = 0
+  for _, e in pairs(recovery) do if type(e) == "table" and e.index > maxi then maxi = e.index end end
+  for i = 1, maxi do
+    if not instruments[i] then
+      instruments[i] = { name = "Sampler " .. i,
+        plugin_properties = { plugin_loaded = false, plugin_device = nil } }
+    end
+  end
+  -- recovery left nil so scan() calls up_songxml.recover(song) itself, exercising
+  -- the real song.file_name path.
+  local mock_song = { file_name = fixture, instruments = instruments, tracks = {} }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil)
+  local reaktor = 0
+  for _, e in ipairs(entries) do
+    if (e.analysis and e.analysis.base or ""):find("reaktor") then reaktor = reaktor + 1 end
+  end
+  check(reaktor >= 1, "Reaktor recovered end-to-end via song.file_name (was dropped before)")
+  -- A non-protocol-named missing plugin must also be recovered, not skipped.
+  local named
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.analysis and e.analysis.base:find("kick") then named = e end
+  end
+  check(named ~= nil, "protocol-less missing plugin (Kick) recovered via song.xml")
+end
+
+section("up_inventory.scan captures instrument preset name")
+do
+  -- A plugin instrument with a selected preset (e.g. a Reaktor ensemble) must
+  -- expose the preset name + chunk so the UI can show it and carry it over.
+  local mock_song = {
+    instruments = {
+      { name = "Reaktor Inst", plugin_properties = { plugin_loaded = true,
+        plugin_device = { device_path = "aumuRk5----", name = "Native Instruments: Reaktor5",
+          active_preset = 3, presets = { "Init", "Foo", "Make It Bright" },
+          active_preset_data = "<PresetName>Make It Bright</PresetName>", parameters = {} } } },
+    },
+    tracks = {},
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil)
+  local e
+  for _, x in ipairs(entries) do if x.kind == "instrument" then e = x end end
+  check(e and e.active_preset_name == "Make It Bright",
+    "instrument active_preset_name captured from presets[index]")
+  check(e and type(e.active_preset_data) == "string" and e.active_preset_data ~= "",
+    "instrument active_preset_data captured")
 end
 
 -- 7. main.lua + up_ui (headless, mocked Renoise) ------------------------------
@@ -554,6 +1004,222 @@ do
     up_ui.stop_all()
   end)
   check(ok_dlg, "show_dialog + scan flow runs headlessly" .. (ok_dlg and "" or (": " .. tostring(err_dlg))))
+end
+
+section("up_ui shows preset and carry-over in both columns")
+do
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._vb:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui.clear_list()
+
+  -- Explicit preset name: shown in both columns, carried over to the upgrade.
+  local rec = { kind = "instrument", instrument_name = "My Reaktor",
+    analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5"),
+    device_name = "Native Instruments: Reaktor5",
+    active_preset_name = "Make It Bright" }
+  local cands = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
+  local rc = { entry = rec, candidates = cands, candidate = cands[1] }
+  up_ui._results = { rc }
+  up_ui.found_row(rec)
+  up_ui._fill_idx = #up_ui._row_views - 1
+  up_ui.fill_row(rc)
+
+  local items = up_ui._row_views[1].popup.items
+  check(items[1]:find("Keep current") ~= nil, "first item is Keep current")
+  check(items[1]:find("Make It Bright") ~= nil,
+    "current plugin shows its preset (Make It Bright)")
+  check(items[2]:find("Reaktor") ~= nil and items[2]:find("Make It Bright") ~= nil,
+    "replacement shows carried-over preset (Reaktor 6 (Make It Bright))")
+end
+
+section("up_ui shows user preset name (not ensemble) for recovered plugin")
+do
+  -- A missing Reaktor's only meaningful preset signal is the user's instrument
+  -- name ("Dark Dreams 1"); the loaded ensemble ("Razor") is the synth, shown only
+  -- as a secondary detail. The preset name must be preserved and carried over, not
+  -- replaced by the ensemble name.
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._vb:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui.clear_list()
+
+  local rec = { kind = "instrument", instrument_name = "Dark Dreams 1",
+    analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5"),
+    device_name = "Native Instruments: Reaktor5",
+    active_preset_name = "Razor", broken = true, recovered = true }
+  local cands = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
+  local rc = { entry = rec, candidates = cands, candidate = cands[1] }
+  up_ui._results = { rc }
+  up_ui.found_row(rec)
+  up_ui._fill_idx = #up_ui._row_views - 1
+  up_ui.fill_row(rc)
+
+  local items = up_ui._row_views[1].popup.items
+  check(items[1]:find("Dark Dreams 1") ~= nil,
+    "current plugin shows the user preset name (Dark Dreams 1)")
+  check(items[2]:find("Dark Dreams 1") ~= nil,
+    "replacement carries over the user preset name (Dark Dreams 1)")
+  check(items[1]:find("Razor") ~= nil,
+    "current plugin still shows the ensemble as a secondary detail (Razor)")
+  -- The ensemble must precede the preset name: "Razor: Dark Dreams 1".
+  check(items[1]:find("Razor: Dark Dreams 1") ~= nil,
+    "ensemble appears before the preset name (Razor: Dark Dreams 1)")
+end
+
+section("up_ui never shows instrument name as a carried-over preset")
+do
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._vb:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui.clear_list()
+
+  -- Instrument whose only identity is its Renoise name (no real preset name): it
+  -- must NOT be leaked into the replacement column as if it were Reaktor 6's
+  -- preset (the earlier "Reaktor 6 (Reaktor5)" bug).
+  local rec = { kind = "instrument", instrument_name = "VST: Reaktor5",
+    analysis = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
+    device_name = "Native Instruments: Reaktor5" }
+  local cands = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
+  local rc = { entry = rec, candidates = cands, candidate = cands[1] }
+  up_ui._results = { rc }
+  up_ui.found_row(rec)
+  up_ui._fill_idx = #up_ui._row_views - 1
+  up_ui.fill_row(rc)
+
+  local items = up_ui._row_views[1].popup.items
+  check(items[2]:find("Reaktor5") == nil,
+    "replacement column does NOT show the old instrument name as a preset")
+  check(items[2]:find("Keep current") == nil and items[2]:find("%(") == nil,
+    "replacement column has no fake (preset) parenthetical when none exists")
+
+  -- And an embedded ensemble (file:// URL in the blob) is recovered and shown.
+  local rec2 = { kind = "instrument", instrument_name = "Reaktor 5",
+    analysis = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
+    device_name = "Native Instruments: Reaktor5",
+    active_preset_data = "\000\000file://localhost/Users/Shared/Razor/Razor.rkplr\000\000" }
+  local rc2 = { entry = rec2, candidates = cands, candidate = cands[1] }
+  up_ui._results = { rc2 }
+  up_ui.found_row(rec2)
+  up_ui._fill_idx = #up_ui._row_views - 1
+  up_ui.fill_row(rc2)
+  local rv2 = up_ui._row_views[#up_ui._row_views]
+  local items2 = rv2.popup.items
+  check(items2[1]:find("Razor") ~= nil, "current plugin shows recovered ensemble (Razor)")
+  check(items2[2]:find("Razor") ~= nil, "replacement shows carried-over ensemble (Razor)")
+
+  -- Missing plugin (failed to open): the only preset hint is the Renoise
+  -- instrument name, e.g. "VST: Reaktor5 (Make It Bright)". Surface that as the
+  -- preset in both columns, but never the bare plugin name ("Reaktor5").
+  local rec3 = { kind = "instrument", instrument_name = "VST: Reaktor5 (Make It Bright)",
+    analysis = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
+    device_name = "Native Instruments: Reaktor5" }
+  local rc3 = { entry = rec3, candidates = cands, candidate = cands[1] }
+  up_ui._results = { rc3 }
+  up_ui.found_row(rec3)
+  up_ui._fill_idx = #up_ui._row_views - 1
+  up_ui.fill_row(rc3)
+  local items3 = up_ui._row_views[#up_ui._row_views].popup.items
+  check(items3[1]:find("Make It Bright") ~= nil,
+    "current shows preset from instrument name (Make It Bright)")
+  check(items3[2]:find("Make It Bright") ~= nil,
+    "replacement shows carried-over preset (Make It Bright)")
+  check(items3[2]:find("Reaktor5") == nil,
+    "replacement does NOT show bare plugin name as preset")
+end
+
+-- ---------------------------------------------------------------------------
+section("coverage: matching fallbacks + find_candidates")
+do
+  -- These exercise the newer candidate-matching code paths (family, loose token,
+  -- shared-token, and the multi-stage find_candidates fallback chain).
+  local old = analyze("AU: Native Instruments: Reaktor5", "Reaktor5.au", "AU")
+  local c = up_matching.find_candidates({
+    analyze("AU: Native Instruments: Reaktor6", "Reaktor6.au", "AU"),
+    analyze("VST: Lennardigital Sylenth1", "/P/Sylenth1.vst", "VST"),
+  }, old)
+  check(c and #c >= 1 and c[1].base:find("reaktor"), "find_candidates offers Reaktor6 for missing Reaktor5")
+
+  local oldf = analyze("VST3: FabFilter Pro-L", "/P/ProL.vst3", "VST3")
+  local cf = analyze("VST3: FabFilter Pro-L 2", "/P/ProL2.vst3", "VST3")
+  check(up_matching.candidate_matches_family(cf, oldf), "family matches Pro-L -> Pro-L 2")
+
+  local oldk = analyze("VST: Kick - Nicky Romero ()", "/P/Kick.vst", "VST")
+  local ck = analyze("VST: Kick 2", "/P/Kick2.vst", "VST")
+  check(up_matching.candidate_matches_loose(ck, oldk), "loose matches Kick -> Kick 2 (artist suffix)")
+  check(up_matching.candidate_matches_shared(ck, oldk), "shared token matches Kick -> Kick 2 by name")
+
+  local exact = analyze("VST3: FabFilter Pro-MB", "/P/ProMB.vst3", "VST3")
+  local diff = analyze("VST3: FabFilter Pro-Q 3", "/P/ProQ3.vst3", "VST3")
+  check(not up_matching.candidate_matches(diff, exact), "exact match rejects different product")
+  check(up_matching.vendor_ok({ vendor = "fabfilter" }, { vendor = "fabfilter" }), "vendor_ok true when vendors match")
+  check(not up_matching.vendor_ok({ vendor = "fabfilter" }, { vendor = "native" }),
+    "vendor_ok false when vendors differ")
+end
+
+section("coverage: up_util.instrument_preset_label variants")
+do
+  local reaktor_a = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5")
+  check(up_util.instrument_preset_label("VST: Reaktor5 (Make It Bright)", "VST", reaktor_a) == "Make It Bright",
+    "label recovered from parenthetical preset")
+  check(up_util.instrument_preset_label("Cinematic Pad 1", "AU", nil) == "Cinematic Pad 1",
+    "label is a bare user patch name")
+  check(up_util.instrument_preset_label("Dark Dreams 1", "AU", reaktor_a) == "Dark Dreams 1",
+    "label is the user patch when unrelated to the plugin name")
+  check(up_util.instrument_preset_label("VST: Reaktor5", "VST", reaktor_a) == "",
+    "empty label when the name is only the plugin itself")
+end
+
+section("coverage: up_core.apply_one success and error path")
+do
+  local track = {
+    devices = { [1] = { is_active = true, active_preset_data = "", parameters = {} } },
+    insert_device_at = function(self, _path, idx)
+      local dev = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+      table.insert(self.devices, idx, dev)
+      return dev
+    end,
+    delete_device_at = function(self, idx) table.remove(self.devices, idx) end,
+  }
+  local song = { tracks = { track }, instruments = {},
+    automation = function() return { is_automated = false } end }
+  local rec = { kind = "track", track_index = 1, device_index = 1, is_plugin = true,
+    device_path = "/P/Sylenth1.vst", device_name = "VST: Lennardigital Sylenth1",
+    analysis = analyze("VST: Lennardigital Sylenth1", "/P/Sylenth1.vst", "VST") }
+  local candidate = { name = "Sylenth1", protocol = "VST", path = "/P/Sylenth1-VST3.vst", analysis = rec.analysis }
+  local ok, res = pcall(function()
+    return up_core.apply_one(song, { entry = rec, candidate = candidate }, candidate)
+  end)
+  check(ok and res and res.status ~= nil, "apply_one runs swap_track_device and returns a status")
+
+  -- A result whose swap throws must be caught and reported, never aborting the run.
+  local bad_rec = { kind = "weird", instrument_index = 1, analysis = rec.analysis }
+  local ok2, res2 = pcall(function()
+    return up_core.apply_one({ instruments = {} }, { entry = bad_rec, candidate = candidate }, candidate)
+  end)
+  check(ok2 and res2 and res2.status == "error", "apply_one catches a swap error and reports status 'error'")
+end
+
+section("coverage: up_inventory.scan surfaces a track plugin device")
+do
+  local mock_song = {
+    instruments = { { name = "Sampler", plugin_properties = { plugin_loaded = false, plugin_device = nil } } },
+    tracks = { { devices = { {}, { is_plugin = true, device_path = "/P/Pro-Q.vst3",
+      device_name = "VST3: FabFilter Pro-Q 3", available_devices = {} } } } },
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil)
+  local found = false
+  for _, e in ipairs(entries) do if e.kind == "track" then found = true; break end end
+  check(found, "scan surfaces a track plugin device as a track entry")
 end
 
 -- ---------------------------------------------------------------------------

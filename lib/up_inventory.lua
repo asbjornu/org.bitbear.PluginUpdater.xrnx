@@ -54,6 +54,69 @@ local function inspect_track_device(track, track_index, dev_index)
   return rec
 end
 
+-- Resolve a recovered-plugin entry for an instrument, trying the live index
+-- first and then the live instrument name (and a name with a trailing "()"
+-- stripped, which Renoise sometimes appends). Index alignment breaks whenever
+-- non-plugin instruments (ext. MIDI, etc.) sit between plugins in the song.
+local function lookup_recovery(recovery, ii, inst)
+  if not recovery then
+    return nil
+  end
+  local info = recovery[ii]
+  if info then
+    return info
+  end
+  if inst and inst.name then
+    info = recovery[inst.name]
+    if info then
+      return info
+    end
+    local stripped = inst.name:match("^(.-)%s*%(%)$")
+    if stripped then
+      info = recovery[stripped]
+      if info then
+        return info
+      end
+    end
+  end
+  return nil
+end
+
+-- Best-effort identity of a missing plugin from the live API. When the saved
+-- .xrns can't be read (song unsaved, or the zip reader fails), Renoise still
+-- retains the plugin's name on plugin_properties even though the device failed
+-- to load, so we can still surface and match the instrument.
+local function live_plugin_name(pp)
+  for _, f in ipairs({ "plugin_name", "plugin_filename", "plugin_device_name" }) do
+    local ok, v = pcall(function() return pp[f] end)
+    if ok and type(v) == "string" and v ~= "" then
+      return v
+    end
+  end
+  return nil
+end
+
+-- Apply a recovered Song.xml identity to a rec. Returns false when the entry
+-- carries no usable display name (caller should try another source). Also lifts
+-- the loaded ensemble/preset name so the UI can show it and carry it over even
+-- for a plugin that failed to load on this machine.
+local function apply_recovered(rec, info)
+  local dn = info.display_name or info.short_display_name or info.identifier
+  if not dn then
+    return false
+  end
+  -- An empty string is truthy in Lua, so a placeholder device with a blank name
+  -- would otherwise survive and leave device_name empty -- exactly the case this
+  -- recovery path exists to fix. Only keep an existing name that is actually set.
+  rec.device_name = (rec.device_name ~= nil and rec.device_name ~= "") and rec.device_name or dn
+  rec.analysis = up_util.analyze_plugin(nil, dn)
+  rec.recovered = true
+  if info.preset_name then
+    rec.active_preset_name = info.preset_name
+  end
+  return true
+end
+
 local function inspect_instrument(inst, ii, recovery)
   local pp = inst.plugin_properties
   local ok_loaded, loaded = pcall(function() return pp.plugin_loaded end)
@@ -78,6 +141,20 @@ local function inspect_instrument(inst, ii, recovery)
     notes = {},
   }
 
+  -- A missing plugin's live device (when Renoise keeps one as a placeholder) is
+  -- unreliable: its path may be an opaque AU 4-char code or empty, its name may
+  -- be blank, and its preset state is inaccessible. Recover the authoritative
+  -- identity AND the loaded ensemble/preset name from the saved song FIRST, so
+  -- the grid row is correct and the preset carries over. We only fall back to the
+  -- (possibly broken) live device when the song yields nothing.
+  if not is_loaded then
+    local info = lookup_recovery(recovery, ii, inst)
+    if info and apply_recovered(rec, info) then
+      rec.notes = { "plugin not loaded; recovered identity from song.xml: " .. tostring(rec.device_name) }
+      return rec
+    end
+  end
+
   if adev then
     local ok_path, path = pcall(function() return adev.device_path end)
     rec.device_path = ok_path and path or nil
@@ -88,42 +165,67 @@ local function inspect_instrument(inst, ii, recovery)
       rec.readable = true
       rec.preset_data_accessible = true
       rec.preset_data_len = pd and #pd or 0
+      rec.active_preset_data = pd
     end
     local ok_ap, ap = pcall(function() return adev.active_preset end)
     if ok_ap then
       rec.active_preset = ap
+      -- Map the preset index to its name (e.g. a Reaktor ensemble) so the UI can
+      -- show the current preset and indicate it carries over to the replacement.
+      local ok_p, presets = pcall(function() return adev.presets end)
+      if ok_p and presets and ap and ap > 0 and presets[ap] then
+        rec.active_preset_name = presets[ap]
+      end
     end
     if rec.device_path then
       rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name or inst.name)
-    else
-      -- Plugin present but its path is hidden by the API: try to recover the
-      -- identity from the saved song so it can still be matched.
-      local info = recovery and recovery[ii]
-      if info and info.display_name then
-        rec.device_name = rec.device_name or info.display_name
-        rec.analysis = up_util.analyze_plugin(nil, info.display_name)
-        rec.recovered = true
-        table.insert(rec.notes, "recovered identity from song.xml: " .. tostring(info.display_name))
-      else
-        table.insert(rec.notes, "original plugin path unavailable; cannot auto-match")
-      end
+      return rec
     end
+    -- Plugin present but its path is hidden by the API: try to recover the
+    -- identity from the saved song so it can still be matched.
+    local info = lookup_recovery(recovery, ii, inst)
+    if info and apply_recovered(rec, info) then
+      table.insert(rec.notes, "recovered identity from song.xml: " .. tostring(rec.device_name))
+      return rec
+    end
+    -- Device present but unidentifiable: still surface it (defaults to Keep current).
+    rec.analysis = up_util.analyze_plugin(nil, rec.device_name or inst.name)
     return rec
   end
 
-  -- No live plugin device. When the plugin simply failed to load (missing on
-  -- this machine) the API exposes nothing, but the saved Song.xml still records
-  -- what it was. Recover that so the missing instrument can be matched + upgraded.
-  local info = recovery and recovery[ii]
-  if info and info.display_name then
-    rec.device_name = info.display_name
-    rec.analysis = up_util.analyze_plugin(nil, info.display_name)
+  -- No live plugin device and (when the plugin was missing) song recovery above
+  -- already failed. The saved Song.xml still records what the plugin was; we
+  -- already tried that above. Fall back to the live plugin_properties name, then
+  -- to a protocol token in the instrument name.
+  local info = lookup_recovery(recovery, ii, inst)
+  if info and apply_recovered(rec, info) then
+    rec.notes = { "plugin not loaded; recovered identity from song.xml: " .. tostring(rec.device_name) }
+    return rec
+  end
+
+  -- Not a plugin instrument we can identify (e.g. a sampler or ext. MIDI
+  -- device with no recovered plugin identity) -- nothing to upgrade, so leave
+  -- it out of the grid rather than show a blank/no-match row.
+  local live = live_plugin_name(pp)
+  if live then
+    rec.device_name = live
+    rec.analysis = up_util.analyze_plugin(nil, live)
     rec.recovered = true
-    rec.notes = { "plugin not loaded; recovered identity from song.xml: " .. tostring(info.display_name) }
+    rec.notes = { "recovered identity from live plugin_properties: " .. tostring(live) }
     return rec
   end
-
-  -- Not a plugin instrument (e.g. a sampler) -- nothing to upgrade.
+  -- Last resort: a missing instrument whose name still carries a plugin protocol
+  -- token (e.g. "VST: Kick - Nicky Romero ()") is treated as a plugin and
+  -- surfaced using that name as its identity. Loose / shared-token matching can
+  -- then still find an upgrade (Kick -> Kick 2). Nameless samplers and ext. MIDI
+  -- devices are left out to avoid blank rows.
+  if inst.name and inst.name ~= "" and up_util.detect_protocol(inst.name) then
+    rec.device_name = inst.name
+    rec.analysis = up_util.analyze_plugin(nil, inst.name)
+    rec.recovered = false
+    rec.notes = { "identity from live instrument name only (no plugin_properties/song.xml)" }
+    return rec
+  end
   return nil
 end
 

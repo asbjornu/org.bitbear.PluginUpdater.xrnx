@@ -1,6 +1,7 @@
 local up_songxml = {}
 
 local up_zip = require("up_zip")
+local up_preset = require("up_preset")
 
 -- When a plugin is missing on the machine, renoise.song().instruments[i]
 -- .plugin_properties.plugin_device is nil, so the live API exposes no path or
@@ -17,12 +18,33 @@ local up_zip = require("up_zip")
 
 local _cache = { file = nil, data = nil }
 
-local function read_song_xml(_song)
+local function read_song_xml(song)
   local ok_app, app = pcall(function() return renoise.app() end)
   if not ok_app or not app then
     return nil
   end
-  local path = app.song_filename
+  -- The absolute path to the loaded/saved song is exposed as song().file_name
+  -- (empty string when the song has never been saved). Older/incorrect spellings
+  -- (app.song_filename, song().song_filename) are kept only as fallbacks in case a
+  -- Renoise build differs. Guarding each access is essential: reading a property
+  -- that does not exist on the API object throws, which would otherwise silence
+  -- recovery entirely -- and without recovery, missing plugins whose instrument
+  -- name carries no protocol token (e.g. "Dark Dreams 1") can never be matched.
+  local path
+  local ok_f, fv = pcall(function() return song.file_name end)
+  if ok_f and fv and fv ~= "" then
+    path = fv
+  else
+    local ok_p, pv = pcall(function() return app.song_filename end)
+    if ok_p and pv and pv ~= "" then
+      path = pv
+    else
+      local ok_s, sv = pcall(function() return renoise.song().song_filename end)
+      if ok_s and sv and sv ~= "" then
+        path = sv
+      end
+    end
+  end
   if not path or path == "" then
     return nil
   end
@@ -53,23 +75,52 @@ function up_songxml.parse_instruments(xml)
     return out
   end
   local idx = 0
-  for block in xml:gmatch("<Instrument[^>]*>(.-)</Instrument>") do
+  -- Iterate each real <Instrument> (plain or with attributes). A tag is only an
+  -- instrument open when "Instrument" is immediately followed by ">" or whitespace
+  -- (attributes); this excludes <InstrumentGroup> wrappers, which would otherwise be
+  -- matched as an instrument open tag and swallow the first inner <Instrument> up to
+  -- its own </Instrument>, dropping that instrument. Requiring ">" or a space right
+  -- after "Instrument" (never a letter) excludes groups at the match level while
+  -- still supporting attributes. We also index each entry by name/display/identifier
+  -- so callers can look a plugin up by the live instrument's name -- robust against
+  -- reordering or non-plugin instruments (e.g. ext. MIDI) that shift the indices
+  -- between the song and its Song.xml.
+  for block in xml:gmatch("<Instrument[%s>][^<>]*(.-)</Instrument>") do
     idx = idx + 1
-    local ptype = block:match("<PluginType>(.-)</PluginType>")
-    if ptype then
-      local identifier = block:match("<PluginIdentifier>(.-)</PluginIdentifier>")
-      local disp = block:match("<PluginDisplayName>(.-)</PluginDisplayName>")
-      local sdisp = block:match("<PluginShortDisplayName>(.-)</PluginShortDisplayName>")
-      local iname = block:match("<Name>(.-)</Name>")
-      out[idx] = {
-        index = idx,
-        instrument_name = iname,
-        protocol = ptype,
-        identifier = identifier,
-        display_name = disp or sdisp,
-        short_display_name = sdisp or disp,
-      }
-    end
+      local ptype = block:match("<PluginType[^>]*>(.-)</PluginType>")
+      if ptype then
+        local identifier = block:match("<PluginIdentifier[^>]*>(.-)</PluginIdentifier>")
+        local disp = block:match("<PluginDisplayName[^>]*>(.-)</PluginDisplayName>")
+        local sdisp = block:match("<PluginShortDisplayName[^>]*>(.-)</PluginShortDisplayName>")
+        local iname = block:match("<Name[^>]*>(.-)</Name>")
+        -- Recover the loaded ensemble/preset name that Renoise stores inside the
+        -- plugin's opaque ParameterChunk (base64-encoded CDATA). For Reaktor /
+        -- Kontakt this is the "file://.../Name.ext" path of the loaded ensemble;
+        -- surfacing it lets the tool show the preset even when the plugin itself
+        -- failed to load on this machine (so the live API exposes no preset name).
+        local preset_name
+        -- Tolerate attributes on <ParameterChunk> and surrounding whitespace before
+        -- the CDATA (real Song.xml may write <ParameterChunk preset="..."> or indent
+        -- the block), otherwise the ensemble/preset name would never be recovered.
+        local cdata = block:match("<ParameterChunk[^>]*>%s*<%!%[CDATA%[(.-)%]%]>%s*</ParameterChunk>")
+        if cdata then
+          preset_name = up_preset.extract_name({ active_preset_data = cdata })
+        end
+        local entry = {
+          index = idx,
+          instrument_name = iname,
+          protocol = ptype,
+          identifier = identifier,
+          display_name = disp or sdisp,
+          short_display_name = sdisp or disp,
+          preset_name = preset_name,
+        }
+        out[idx] = entry
+        if iname then out[iname] = entry end
+        if disp then out[disp] = entry end
+        if sdisp then out[sdisp] = entry end
+        if identifier then out[identifier] = entry end
+      end
   end
   return out
 end

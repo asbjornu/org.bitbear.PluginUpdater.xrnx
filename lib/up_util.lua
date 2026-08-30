@@ -6,6 +6,28 @@ local DETECT_ORDER = { "CLAP", "VST3", "VST2", "VST", "AU", "LV2", "DSSI" }
 
 local NOISE = { audio = true, effects = true, generators = true, native = true, plugin = true }
 
+-- Manufacturer / generic words to ignore when matching on a shared token. A shared
+-- vendor (e.g. "fabfilter") must not by itself count as a product match -- that
+-- would wrongly pair "Pro-MB" with "Pro-Q". Only a shared product word (e.g.
+-- "kick", "reaktor") is significant.
+local NONPRODUCT = {
+  fabfilter = true, native = true, instruments = true, sonic = true, academy = true,
+  ["u"] = true, ["he"] = true, apple = true, spitfire = true, orchestral = true,
+  tools = true, lennardigital = true, tal = true, togu = true, alliance = true,
+  hornet = true, syntheway = true, mlvst = true, unfiltered = true, knif = true,
+  dio = true, wedge = true, force = true, born = true, net = true, hatch = true,
+  fish = true, rhy = true, generator = true, oberhausen = true, bx = true,
+  ds = true, ace = true, midi = true, dls = true, music = true, device = true,
+  pg = true, sampler = true, ["8x"] = true, one = true, keemun = true,
+  matcha = true, oolong = true, knifonium = true, mega = true, lion = true,
+  thorne = true, audio = true, line = true, synth = true, synthe = true,
+  way = true, ho = true, plugin = true,
+}
+
+function up_util.is_product_token(tok)
+  return not NONPRODUCT[tok]
+end
+
 function up_util.detect_protocol(s)
   if type(s) ~= "string" then return nil end
   local lower = s:lower()

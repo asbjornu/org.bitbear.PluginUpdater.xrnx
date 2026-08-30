@@ -38,31 +38,15 @@ local function pool_signature(song)
   return table.concat(parts, "|")
 end
 
-function up_core.build_pools(song, yield_fn, on_progress, verbose)
+function up_core.build_pools(song, yield_fn, on_progress)
   local sig = pool_signature(song)
   if _pool_cache and _pool_cache.sig == sig then
-    if verbose then
-      print(string.format("[PluginUpdater] reusing cached plugin pool (track=%d inst=%d)",
-        #_pool_cache.track, #_pool_cache.inst))
-    end
     return _pool_cache.track, _pool_cache.inst
   end
   local inst_pool = up_matching.build_instrument_pool(song, yield_fn, on_progress)
-  up_matching.debug_dump_device_infos(song)
   local track_pool = up_matching.build_track_pool(song, yield_fn, on_progress, inst_pool)
   if sig ~= "" then
     _pool_cache = { sig = sig, track = track_pool, inst = inst_pool }
-  end
-  if verbose then
-    print(string.format("[PluginUpdater] track pool=%d inst pool=%d", #track_pool, #inst_pool))
-    for k, a in ipairs(track_pool) do
-      print(string.format("[PluginUpdater]   track_pool[%d] path=%q base=%q vendor=%q proto=%s",
-        k, a.path, a.base, a.vendor, tostring(a.protocol)))
-    end
-    for k, a in ipairs(inst_pool) do
-      print(string.format("[PluginUpdater]   inst_pool[%d] path=%q base=%q vendor=%q proto=%s",
-        k, a.path, a.base, a.vendor, tostring(a.protocol)))
-    end
   end
   return track_pool, inst_pool
 end
@@ -103,7 +87,7 @@ function up_core.analyze(song, yield_fn, on_found, on_entry, on_progress, pools)
   if pools then
     track_pool, inst_pool = pools.track, pools.inst
   else
-    track_pool, inst_pool = up_core.build_pools(song, yield_fn, on_progress, false)
+    track_pool, inst_pool = up_core.build_pools(song, yield_fn, on_progress)
   end
   local results = up_core.match_entries(entries, { track = track_pool, inst = inst_pool },
     yield_fn, on_progress, on_entry)
@@ -117,11 +101,18 @@ function up_core.apply_one(song, result, chosen)
   if not candidate then
     return { status = rec.broken and "skipped-no-candidate-broken" or "skipped-up-to-date" }
   end
-  local swap
-  if rec.kind == "track" then
-    swap = up_swap.swap_track_device(song, rec, candidate)
-  else
-    swap = up_swap.swap_instrument(song, rec, candidate)
+  -- Guard the swap so a single problematic plugin (e.g. a heavy synth whose
+  -- load_plugin exceeds Renoise's script-time budget) cannot abort the entire
+  -- upgrade run; record the failure as a result instead.
+  local ok_swap, swap = pcall(function()
+    if rec.kind == "track" then
+      return up_swap.swap_track_device(song, rec, candidate)
+    else
+      return up_swap.swap_instrument(song, rec, candidate)
+    end
+  end)
+  if not ok_swap or not swap then
+    return { status = "error", detail = tostring(swap) }
   end
   return { status = swap.status, detail = swap.detail }
 end

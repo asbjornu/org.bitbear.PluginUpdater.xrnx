@@ -10,6 +10,7 @@ end
 
 local NAME_KEYS = { "name", "device_name", "display_name", "plugin_name", "product_name", "short_name" }
 
+
 local function track_name_of(info)
   for _, k in ipairs(NAME_KEYS) do
     local v = safeget(info, k)
@@ -34,43 +35,6 @@ local function track_infos(track)
   --   protocols (DeviceInfo.device_path is nil in this binding).
   local okD, strs = pcall(function() return track.available_devices end)
   local okI, infos = pcall(function() return track.available_device_infos end)
-  if not up_matching._dbg_track then
-    up_matching._dbg_track = true
-    print(string.format("[PluginUpdater] devices n=%s  infos n=%s",
-      (okD and strs) and tostring(#strs) or "ERR",
-      (okI and infos) and tostring(#infos) or "ERR"))
-    if okI and infos then
-      local funcs = {}
-      for i = 1, math.min(#infos, 4) do
-        local d = infos[i]
-        local parts = {}
-        for _, k in ipairs(NAME_KEYS) do
-          local v = safeget(d, k)
-          if type(v) == "string" then
-            parts[#parts + 1] = string.format("%s=%q", k, v)
-          elseif type(v) == "function" then
-            funcs[k] = true
-          end
-        end
-        print(string.format("    infos[%d] %s", i,
-          #parts > 0 and table.concat(parts, " ") or "(no string name field)"))
-      end
-      local fk = {}
-      for k in pairs(funcs) do fk[#fk + 1] = k end
-      if #fk > 0 then
-        print("[PluginUpdater] name fields present as methods: " .. table.concat(fk, ", "))
-      end
-    end
-    if okD and strs and okI and infos then
-      for i = 1, math.min(#strs, #infos) do
-        if type(strs[i]) == "string" and strs[i]:find("VST3") then
-          print(string.format("    align[%d] dev=%s -> name=%s",
-            i, strs[i], tostring(track_name_of(infos[i]))))
-          break
-        end
-      end
-    end
-  end
   if okD and strs and #strs > 0 then
     local out = {}
     for i, p in ipairs(strs) do
@@ -88,55 +52,6 @@ end
 -- Structural dump of a track's available_device_infos to discover which field
 -- carries the human-readable plugin name. Renoise DeviceInfo is opaque userdata,
 -- so we probe a candidate list of property getters and report type/value.
-local DEVICE_INFO_KEYS = {
-  "device_path", "device_name", "name", "path", "display_name",
-  "short_name", "plugin_name", "product_name", "vendor_name",
-  "type", "device_type", "is_plugin", "is_active", "active_preset",
-  "parameters", "presets",
-}
-
-local function dump_device_info(info, idx)
-  print(string.format("[PluginUpdater] device_info[%d] type=%s", idx, type(info)))
-  if type(info) ~= "userdata" and type(info) ~= "table" then
-    print(string.format("    value=%s", tostring(info)))
-    return
-  end
-  for _, key in ipairs(DEVICE_INFO_KEYS) do
-    local ok, v = pcall(function() return info[key] end)
-    if ok then
-      local t = type(v)
-      local desc
-      if t == "string" then
-        desc = string.format("%q", v)
-      elseif t == "userdata" or t == "table" then
-        desc = string.format("<%s len=%s>", t, tostring(#v))
-      elseif t == "boolean" then
-        desc = tostring(v)
-      else
-        desc = string.format("<%s> %s", t, tostring(v))
-      end
-      print(string.format("    .%s -> %s", key, desc))
-    end
-    local ok_m, v2 = pcall(function() return info[key .. "_observable"] end)
-    if ok_m and v2 ~= nil then
-      print(string.format("    .%s_observable -> present", key))
-    end
-  end
-end
-
-function up_matching.debug_dump_device_infos(song)
-  for ti = 1, #song.tracks do
-    local ok, infos = pcall(function() return song.tracks[ti].available_device_infos end)
-    if ok and infos and #infos > 0 then
-      print(string.format("[PluginUpdater] dumping available_device_infos for track %d (n=%d)", ti, #infos))
-      for i = 1, math.min(#infos, 6) do
-        dump_device_info(infos[i], i)
-      end
-      return
-    end
-  end
-  print("[PluginUpdater] no available_device_infos found on any track")
-end
 
 function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool)
   local pool = {}
@@ -296,6 +211,32 @@ function up_matching.candidate_matches_loose(c, old)
   return up_util.token_subset(tc, to) or up_util.token_subset(to, tc)
 end
 
+-- Last-resort match for plugins we could only identify by their live instrument
+-- name (the .xrns couldn't be read, so we lack the vendor-prefixed display
+-- name). When the candidate and the old name share a significant token (length
+-- >= 4), treat them as the same product. e.g. "Kick - Nicky Romero" and
+-- "Kick 2" both carry "kick", so the missing Kick surfaces as a Kick 2 upgrade.
+-- Requiring a long shared token keeps unrelated plugins from matching.
+function up_matching.candidate_matches_shared(c, old)
+  if not old then
+    return false
+  end
+  if c.path == old.raw then
+    return false
+  end
+  local tc = up_util.token_set(c.base)
+  local to = up_util.token_set(old.base)
+  if not next(tc) or not next(to) then
+    return false
+  end
+  for k in pairs(tc) do
+    if #k >= 4 and to[k] and up_util.is_product_token(k) then
+      return true
+    end
+  end
+  return false
+end
+
 function up_matching.find_candidate(pool, old_analysis)
   if not old_analysis then
     return nil
@@ -364,6 +305,17 @@ function up_matching.find_candidates(pool, old_or_rec)
     -- Reaktor6, "Kick - Nicky Romero" -> "Kick 2", FF Pro MB -> Pro-MB).
     for _, c in ipairs(pool) do
       if up_matching.candidate_matches_loose(c, old_analysis) then
+        table.insert(list, c)
+      end
+    end
+  end
+  if #list == 0 then
+    -- Last resort: when we could only identify the plugin by its live instrument
+    -- name (the .xrns was unreadable and plugin_properties exposed no name), match
+    -- on a shared significant token so e.g. "Kick - Nicky Romero" still surfaces
+    -- as a "Kick 2" upgrade.
+    for _, c in ipairs(pool) do
+      if up_matching.candidate_matches_shared(c, old_analysis) then
         table.insert(list, c)
       end
     end

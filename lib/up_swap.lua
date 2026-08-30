@@ -2,51 +2,6 @@ local up_preset = require("up_preset")
 
 local up_swap = {}
 
--- Debug helper: set to false for release. When true, dumps every parameter of a
--- device (name, is_automatable, value) and reports synth-match outcomes so we
--- can see why a given parameter (e.g. "Mix") is or isn't carried across.
-local DEBUG_PARAMS = true
-
-local function dump_params(device, label)
-  if not DEBUG_PARAMS then return end
-  local ok, params = pcall(function() return device.parameters end)
-  if not ok or not params then
-    print(string.format("[PluginUpdater]   %s: no parameters available", label))
-    return
-  end
-  print(string.format("[PluginUpdater]   %s: %d parameters", label, #params))
-  for i, p in ipairs(params) do
-    local okv, v = pcall(function() return p.value end)
-    local okn, n = pcall(function() return p.name end)
-    local oka, a = pcall(function() return p.is_automatable end)
-    print(string.format("      [%d] name=%q automatable=%s value=%s",
-      i, (okn and type(n) == "string" and n) or "?",
-      tostring(oka and a), (okv and tostring(v)) or "?"))
-  end
-end
-
-local function dump_synth_outcome(old_params, new_dev)
-  if not DEBUG_PARAMS then return end
-  local ok_p, params = pcall(function() return new_dev.parameters end)
-  if not ok_p or not params then return end
-  local by_name = {}
-  for _, p in ipairs(params) do
-    local okn, n = pcall(function() return p.name end)
-    if okn and type(n) == "string" and n ~= "" then by_name[n] = p end
-  end
-  print("[PluginUpdater]   synth match results:")
-  for _, op in ipairs(old_params) do
-    local np = by_name[op.name]
-    if np then
-      local oka, a = pcall(function() return np.is_automatable end)
-      local why = (oka and a) and "applied" or "SKIPPED (not automatable)"
-      print(string.format("      old %q -> %s", op.name, why))
-    else
-      print(string.format("      old %q -> NO MATCH in new device", op.name))
-    end
-  end
-end
-
 -- Capture the old plugin's exposed parameter values so we can re-apply them to
 -- the replacement plugin as a best-effort "synthesized" preset when the native
 -- preset chunk can't be transferred (e.g. across plugin formats). Only
@@ -95,7 +50,6 @@ local function apply_param_values(new_dev, old_params)
       if ok_set then applied = applied + 1 end
     end
   end
-  dump_synth_outcome(old_params, new_dev)
   return applied
 end
 
@@ -181,6 +135,7 @@ end
 local function restore_automation_data(captured, new_device, song)
   local count = 0
   if not new_device or not song then return count end
+  if not captured or type(captured) ~= "table" then return count end
   local ok_p, params = pcall(function() return new_device.parameters end)
   if not ok_p or not params then return count end
   local by_name = {}
@@ -225,23 +180,13 @@ end
 -- such as Mix. If no parameters map, we keep the loaded preset; otherwise we
 -- return the synthesized result.
 local function transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
-  print(string.format(
-    "[PluginUpdater] transfer_state: old_data type=%s len=%s preset=%s same_format=%s",
-    type(old_data),
-    (type(old_data) == "string") and tostring(#old_data) or "-",
-    tostring(old_preset_name),
-    tostring(same_format)))
-
   if old_data and old_data ~= "" and same_format then
-    local ok, errmsg = pcall(function() new_dev.active_preset_data = old_data end)
+    local ok = pcall(function() new_dev.active_preset_data = old_data end)
     if ok then
       local ok2, got = pcall(function() return new_dev.active_preset_data end)
       if ok2 and got and got ~= "" then
         return "parameters"
       end
-    else
-      print(string.format("[PluginUpdater]   active_preset_data assignment failed: %s",
-        tostring(errmsg)))
     end
   end
 
@@ -296,10 +241,15 @@ function up_swap.swap_track_device(song, rec, candidate)
   local old_active = nil
   local ok_act, act = pcall(function() return old_device.is_active end)
   if ok_act then old_active = act end
-  dump_params(old_device, "OLD")
   local was_broken = rec.broken
   local old_proto = rec.analysis and rec.analysis.protocol
   local same_format = (old_proto and old_proto == candidate.protocol)
+
+  -- See swap_instrument: skip a candidate that is already the loaded device.
+  if rec.device_path and rec.device_path == candidate.path then
+    return { status = "up-to-date", new_path = candidate.path,
+      detail = "plugin already current" }
+  end
 
   local ok_ins, dev_or_err = pcall(function()
     return track:insert_device_at(candidate.path, old_index)
@@ -312,7 +262,6 @@ function up_swap.swap_track_device(song, rec, candidate)
     }
   end
   local new_dev = dev_or_err
-  dump_params(new_dev, "NEW")
   local auto_count = rebind_automation(captured_auto, new_dev)
   local method, err = transfer_state(new_dev, old_data, old_preset_name, same_format, old_params)
   -- Set is_active last: transfer_state may load a base preset, which can reset
@@ -352,7 +301,7 @@ function up_swap.swap_instrument(song, rec, candidate)
   local old_params = {}
   local old_preset_name = nil
   local old_active = nil
-  local captured_auto = nil
+  local captured_auto = {}
   if rec.plugin_loaded and pp.plugin_device then
     local ok_pd, pd = pcall(function() return pp.plugin_device.active_preset_data end)
     if ok_pd then
@@ -367,14 +316,33 @@ function up_swap.swap_instrument(song, rec, candidate)
   -- Missing plugin: the live API exposes no preset, but the instrument name is
   -- usually the user's patch/preset (e.g. a Reaktor ensemble). The replacement
   -- plugin keeps its own presets (stored in the plugin, not the song), so try to
-  -- load it by that name in the newly inserted plugin.
+  -- load it by that name in the newly inserted plugin. Extract the parenthetical
+  -- label when present (e.g. "VST: Reaktor5 (Make It Bright)" -> "Make It Bright")
+  -- so it can match a real factory preset; otherwise only treat the name as a
+  -- preset when it isn't a "PROTO:"-prefixed plugin identity.
   if not old_preset_name and rec.broken and rec.instrument_name and rec.instrument_name ~= "" then
-    old_preset_name = rec.instrument_name
+    local lbl = rec.instrument_name:match("%(([^()]*)%)$")
+    -- Renoise appends an empty "()" to some broken instrument names; treat the
+    -- parenthetical as a preset only when it holds non-whitespace text (and trim
+    -- it), otherwise the empty string would be kept as a truthy "real" preset.
+    if lbl and lbl:match("%S") then
+      old_preset_name = lbl:match("^%s*(.-)%s*$")
+    elseif not rec.instrument_name:match("^%s*[%w%+%-]+%s*:%s*") then
+      old_preset_name = rec.instrument_name
+    end
   end
-  dump_params(pp.plugin_device, "OLD")
   local was_broken = rec.broken
   local old_proto = rec.analysis and rec.analysis.protocol
   local same_format = (old_proto and old_proto == candidate.protocol)
+
+  -- No-op upgrade: the candidate is the plugin that is already loaded at this
+  -- instrument. Reloading it (via load_plugin) is wasted work and, for heavy
+  -- synths, can exceed Renoise's script-time budget and trip the "script busy"
+  -- watchdog. The instrument is already current, so skip it.
+  if rec.device_path and rec.device_path == candidate.path then
+    return { status = "up-to-date", new_path = candidate.path,
+      detail = "plugin already current" }
+  end
 
   local ok_load, loaded = pcall(function() return pp:load_plugin(candidate.path) end)
   if not ok_load or not loaded then
@@ -389,7 +357,6 @@ function up_swap.swap_instrument(song, rec, candidate)
   if old_active ~= nil and new_dev then
     pcall(function() new_dev.is_active = old_active end)
   end
-  if new_dev then dump_params(new_dev, "NEW") end
   local auto_count = restore_automation_data(captured_auto, new_dev, song)
   if not new_dev then
     if rec.device_path then
