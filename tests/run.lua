@@ -14,7 +14,9 @@
 -- matter the current working directory. `arg[0]` can be a relative path, so
 -- anchor it to $PWD when needed, normalise separators, then strip the
 -- "/tests/run.lua" suffix to reach the repo root.
-local src = arg[0] or "."
+-- `arg` is a CLI convenience table and may be absent in embedded interpreters,
+-- so guard it (type() is safe on nil) for the claimed "any Lua 5.1+" portability.
+local src = (type(arg) == "table" and arg[0]) or "."
 if not src:match("^/") then
   src = (os.getenv("PWD") or ".") .. "/" .. src
 end
@@ -120,7 +122,7 @@ end
 section("up_util.token_set / token_subset")
 do
   local t1 = up_util.token_set("Sonic Academy: Kick - Nicky Romero")
-  check(t1.kick and t1.nicky and t1.romero, "token_set splits significant words (incl. single-char q)")
+  check(t1.kick and t1.nicky and t1.romero, "token_set splits significant words (e.g. Kick - Nicky - Romero)")
   local t2 = up_util.token_set("FabFilter Pro-Q 3")
   check(t2["q"], "single-char token 'q' is preserved (Pro-Q)")
   check(up_util.token_subset(up_util.token_set("fabfilter pro mb"),
