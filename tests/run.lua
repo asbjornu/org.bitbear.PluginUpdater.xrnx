@@ -96,7 +96,8 @@ end
 section("compile-check all sources")
 local sources = { "main.lua", "lib/up_core.lua", "lib/up_inventory.lua",
   "lib/up_matching.lua", "lib/up_preset.lua", "lib/up_slicer.lua",
-  "lib/up_songxml.lua", "lib/up_swap.lua", "lib/up_ui.lua", "lib/up_util.lua" }
+  "lib/up_songxml.lua", "lib/up_swap.lua", "lib/up_ui.lua", "lib/up_util.lua",
+  "lib/up_zip.lua" }
 for _, s in ipairs(sources) do
   local f, err = loadfile(root .. "/" .. s)
   check(f ~= nil, "compiles: " .. s .. (err and (" (" .. err .. ")") or ""))
