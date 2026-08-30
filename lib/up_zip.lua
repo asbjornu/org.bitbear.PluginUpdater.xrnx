@@ -104,7 +104,7 @@ function up_zip.extract(zip_path, entry_name)
 
   -- Read just the local header to locate the compressed-data window precisely.
   local lh = read_at(local_offset, 30)
-  if not lh or lh:byte(1) ~= 0x50 or lh:byte(2) ~= 0x4b
+  if not lh or #lh < 30 or lh:byte(1) ~= 0x50 or lh:byte(2) ~= 0x4b
     or lh:byte(3) ~= 0x03 or lh:byte(4) ~= 0x04 then
     f:close(); return nil
   end

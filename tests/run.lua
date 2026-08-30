@@ -21,6 +21,11 @@ if not src:match("^/") then
   src = (os.getenv("PWD") or ".") .. "/" .. src
 end
 src = src:gsub("\\", "/")
+-- Collapse "/./" segments so the suite still resolves the repo root when it is
+-- invoked as e.g. "lua ./tests/run.lua" from a non-root working directory
+-- (arg[0] then holds "/abs/path/./tests/run.lua", which the pattern wouldn't
+-- otherwise match).
+src = src:gsub("/%./", "/")
 local root = src:match("(.*)/tests/run%.lua$")
 if not root or root == "" then root = "." end
 package.path = (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path

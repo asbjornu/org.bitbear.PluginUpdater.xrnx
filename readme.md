@@ -38,12 +38,12 @@ previous preset/state.
    captured parameter values (matched by name); (c) if no transfer method
    succeeds, keep the new plugin at default state — strictly better than a
    missing plugin. The device enabled/bypass flag is preserved.
-  - **Automation is preserved.** Plugin automation (track-device and
-    instrument) is carried across the replacement, matched by parameter
-    name: track devices rebind their live automation objects onto the new
-    device, and instrument plugins rebuild it from the captured point data.
-    All of this is best-effort and fully `pcall`-guarded, so a failure
-    never aborts the upgrade.
+      - **Automation is preserved.** Plugin automation (track-device and
+        instrument) is carried across the replacement, matched by parameter
+        name: track devices rebind their live automation objects onto the new
+        device, and instrument plugins rebuild it from the captured point data.
+        All of this is best-effort and fully `pcall`-guarded, so a failure
+        never aborts the upgrade.
 4. **Per-row UI + live refresh.** Shows a grid with the current plugin, a
    "Replace with" dropdown of candidates (auto-selecting the best upgrade),
    and a result column. The dialog watches the song and re-scans (reusing
