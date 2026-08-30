@@ -1,5 +1,9 @@
 return {
   reporter = "lcov",
   reportfile = "coverage.lcov",
-  include = { "lib/.*" },
+  -- Match both the on-disk path (lib/up_util.lua) and the require name
+  -- (up_util), since either form may appear depending on how LuaCov names the
+  -- chunk, so the library modules actually show up in the report.
+  include = { "lib/.*", "up_.*" },
+  exclude = { "tests/.*" },
 }
