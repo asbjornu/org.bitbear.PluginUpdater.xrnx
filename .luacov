@@ -4,8 +4,8 @@ return {
   -- Match both the on-disk path (lib/up_util.lua) and the require name
   -- (up_util), since either form may appear depending on how LuaCov names the
   -- chunk, so the library modules actually show up in the report.
-  include = { "lib/.*", "up_.*" },
+  include = { "lib/.*", "up_.*", ".*main.*" },
   -- Exclude the vendored third-party library so its (large, not-ours) line
   -- coverage doesn't skew the percentages reported to Codecov.
-  exclude = { "tests/.*", "lib/LibDeflate%.lua" },
+  exclude = { "tests/.*", ".*LibDeflate.*" },
 }
