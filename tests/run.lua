@@ -212,6 +212,22 @@ do
     "base includes artist suffix tokens")
 end
 
+section("up_util.is_native_path (native namespace, not vendor)")
+do
+  -- Renoise's built-in devices live under "Native/" (e.g. Audio/Effects/Native/Gainer).
+  check(up_util.is_native_path("Audio/Effects/Native/Gainer"), "built-in native device path is native")
+  check(up_util.is_native_path("Audio/Instruments/Native/Multi-Sampler"), "native instrument path is native")
+  -- The vendor "Native Instruments" must NOT be mistaken for a built-in device,
+  -- otherwise every plugin from that vendor (Reaktor, Kontakt, ...) is dropped
+  -- from the candidate pool and can never be offered as an upgrade.
+  check(not up_util.is_native_path("Native Instruments: Reaktor 6"),
+    "vendor 'Native Instruments' is NOT native")
+  check(not up_util.is_native_path("/Library/Audio/Plug-Ins/VST/Native Instruments/Reaktor 6.vst"),
+    "filesystem path under 'Native Instruments' is NOT native")
+  check(not up_util.is_native_path("VST: Native Instruments: Kontakt 7"),
+    "display name with 'Native Instruments' is NOT native")
+end
+
 section("up_util.token_set / token_subset")
 do
   local t1 = up_util.token_set("Sonic Academy: Kick - Nicky Romero")
@@ -297,6 +313,98 @@ do
   local poolQ = { analyze("VST3: FabFilter Pro-Q 3", "/P/ProQ3.vst3", "VST3") }
   check(#candidates_for("AU: FabFilter FF Pro MB", poolQ, false) == 0,
     "FF Pro MB -> Pro-Q 3: no cross-product match")
+
+  -- cross-version upgrade: when both the old and new release are installed the
+  -- tool must offer the newer version (not just mirror the old one back).
+  local poolProL = {
+    analyze("VST: FabFilter Pro-L", "/P/ProL1.vst", "VST"),
+    analyze("VST: FabFilter Pro-L 2", "/P/ProL2.vst", "VST"),
+  }
+  local proL = candidates_for("VST: FabFilter Pro-L", poolProL, false)
+  check(#proL == 2, "Pro-L -> [Pro-L, Pro-L 2] both offered")
+  check(proL[1].name:find("Pro%-L 2") ~= nil, "Pro-L auto-upgrades to Pro-L 2 (newest first)")
+
+  local poolKickBoth = {
+    analyze("VST: Sonic Academy: Kick", "/P/Kick1.vst", "VST"),
+    analyze("VST: Sonic Academy: Kick 2", "/P/Kick2.vst", "VST"),
+  }
+  local kick = candidates_for("VST: Sonic Academy: Kick", poolKickBoth, false)
+  check(#kick == 2, "Kick -> [Kick, Kick 2] both offered")
+  check(kick[1].name:find("Kick 2") ~= nil, "Kick auto-upgrades to Kick 2 (newest first)")
+
+  -- only the new release installed (old one missing) still matches.
+  local newProL = { analyze("VST: FabFilter Pro-L 2", "/P/ProL2.vst", "VST") }
+  check(#candidates_for("VST: FabFilter Pro-L", newProL, false) == 1,
+    "Pro-L -> Pro-L 2 when only the new release is installed")
+  local newKick = { analyze("VST: Sonic Academy: Kick 2", "/P/Kick2.vst", "VST") }
+  check(#candidates_for("VST: Sonic Academy: Kick", newKick, false) == 1,
+    "Kick -> Kick 2 when only the new release is installed")
+end
+
+-- 4b. Instrument pool must keep VST3 plugins whose `info.path` is an opaque UID
+-- (no "vst3" token), otherwise they are silently dropped and never surface as a
+-- replacement (e.g. "Kick 2" would be missing entirely).
+section("up_matching.build_instrument_pool (VST3 opaque paths)")
+do
+  local vst3_kick = { path = "{A1B2C3D4-0000-0000-0000-000000000000}", name = "Sonic Academy: Kick 2" }
+  local vst_pl = { path = "/P/ProL2.vst", name = "FabFilter Pro-L 2" }
+  local mock_song = {
+    instruments = {
+      { plugin_properties = { available_plugin_infos = { vst3_kick, vst_pl } } },
+    },
+  }
+  local pool = up_matching.build_instrument_pool(mock_song, nil, nil)
+  local names = {}
+  for _, a in ipairs(pool) do names[a.name] = true end
+  check(names["Sonic Academy: Kick 2"], "VST3 instrument with opaque path is kept in pool")
+  check(names["FabFilter Pro-L 2"], "VST instrument with real path is kept in pool")
+  local cands = up_matching.find_candidates(pool,
+    { analysis = up_util.analyze_plugin(nil, "Sonic Academy: Kick") })
+  check(#cands == 1 and cands[1].name:find("Kick 2") ~= nil,
+    "old Kick -> Kick 2 candidate found in instrument pool")
+end
+
+-- 4c. Native Instruments plugins (vendor name contains the word "native") must
+-- NOT be filtered out of the instrument pool, otherwise Reaktor 6 could never be
+-- offered as an upgrade to Reaktor 5. Regression test for the is_native_path
+-- false-positive on the "Native Instruments" vendor.
+section("up_matching.build_instrument_pool keeps Native Instruments plugins")
+do
+  local reaktor6_au = { path = "aumuRk6----", name = "Native Instruments: Reaktor 6" }
+  local reaktor6_vst3 = { path = "{B2C3D4E5-0000-0000-0000-000000000000}", name = "Reaktor 6" }
+  local mock_song = {
+    instruments = {
+      { plugin_properties = { available_plugin_infos = { reaktor6_au, reaktor6_vst3 } } },
+    },
+  }
+  local pool = up_matching.build_instrument_pool(mock_song, nil, nil)
+  local names = {}
+  for _, a in ipairs(pool) do names[a.name] = true end
+  check(names["Native Instruments: Reaktor 6"], "AU 'Native Instruments: Reaktor 6' kept in pool")
+  check(names["Reaktor 6"], "VST3 'Reaktor 6' kept in pool")
+   local cands = up_matching.find_candidates(pool,
+     { analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
+   check(#cands >= 1 and cands[1].name:find("Reaktor 6") ~= nil,
+     "Reaktor 5 -> Reaktor 6 offered as upgrade")
+end
+
+-- 4c2. available_plugin_infos entries without a loadable path (path nil or "")
+-- must be skipped: they cannot be loaded and would otherwise surface as pool
+-- candidates whose .path later blows up in pp:load_plugin / insert_device_at.
+section("up_matching.build_instrument_pool skips entries without a path")
+do
+  local good = { path = "/P/ProQ3.vst3", name = "FabFilter Pro-Q 3" }
+  local nil_path = { path = nil, name = "Ghost Plugin" }
+  local empty_path = { path = "", name = "Also Ghost" }
+  local mock_song = {
+    instruments = {
+      { plugin_properties = { available_plugin_infos = { good, nil_path, empty_path } } },
+    },
+  }
+  local pool = up_matching.build_instrument_pool(mock_song, nil, nil)
+  check(#pool == 1, "only the entry with a real path is pooled (nil/empty dropped)")
+  check(pool[1] and pool[1].path == "/P/ProQ3.vst3",
+    "pooled entry keeps its valid path as the load handle")
 end
 
 -- 5. up_songxml ---------------------------------------------------------------

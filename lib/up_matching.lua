@@ -219,13 +219,33 @@ function up_matching.build_instrument_pool(song, yield_fn, on_progress)
   end
   if infos then
     for j, info in ipairs(infos) do
-      local p = info.path or info.name
-      if p and up_util.is_plugin_path(p) and not seen[p] then
-        seen[p] = true
-        local a = up_util.analyze_plugin(p, info.name)
-        a.path = p
-        a.name = info.name
-        table.insert(pool, a)
+      -- We got this entry from `available_plugin_infos`, which lists plugins
+      -- only, so trust the name rather than gating on the path. For VST3 (and
+      -- some AU) instruments `info.path` is an opaque UID / 4-char code with no
+      -- protocol token, so `is_plugin_path` would wrongly reject it and the
+      -- plugin (e.g. "Kick 2") would vanish from the candidate pool. The name
+      -- is the reliable key for matching; `info.path` is still kept because it
+      -- is the handle Renoise uses to actually load the plugin.
+      local nm = info.name
+      if type(nm) ~= "string" or nm == "" then
+        nm = info.path
+      end
+      -- available_plugin_infos yields loadable plugin handles, so a usable path
+      -- is required: a nil/empty path cannot be loaded and would later blow up
+      -- in pp:load_plugin(candidate.path) / track:insert_device_at(candidate.path).
+      -- VST3/AU paths are opaque UIDs but are still valid, non-empty string
+      -- handles Renoise loads by, so gate on a non-empty string rather than on
+      -- path shape.
+      if type(info.path) == "string" and info.path ~= "" then
+        if type(nm) == "string" and nm ~= "" and not up_util.is_native_path(nm) then
+          if not seen[info.path] then
+            seen[info.path] = true
+            local a = up_util.analyze_plugin(info.path, nm)
+            a.path = info.path
+            a.name = nm
+            table.insert(pool, a)
+          end
+        end
       end
       if yield_fn and (j % 50 == 0) then
         yield_fn()
@@ -299,6 +319,26 @@ end
 -- recovered from the song, and healthy plugins whose installed equivalent differs
 -- in version or branding -- e.g. AU "FabFilter FF Pro MB" -> VST3 "FabFilter
 -- Pro-MB", or Reaktor5 -> Reaktor6.
+-- Same-product match across versions: the candidate shares the old plugin's
+-- product family (its base with the trailing version stripped), so e.g. both
+-- "Pro-L" and "Pro-L 2" collapse to "fabfilter pro l" and match each other.
+-- Unlike candidate_matches (strict same-version) this deliberately spans major
+-- versions so an installed newer release is offered as an upgrade. Unlike the
+-- loose token match it never crosses into a different product, so "Pro-Q 3" is
+-- never offered for "Pro-L".
+function up_matching.candidate_matches_family(c, old)
+  if not old then
+    return false
+  end
+  if c.path == old.raw then
+    return false
+  end
+  if up_util.family_base(c.base) ~= up_util.family_base(old.base) then
+    return false
+  end
+  return up_matching.vendor_ok(c, old)
+end
+
 function up_matching.find_candidates(pool, old_or_rec)
   local old_analysis = old_or_rec
   if type(old_or_rec) == "table" and old_or_rec.analysis then
@@ -307,19 +347,25 @@ function up_matching.find_candidates(pool, old_or_rec)
   if not old_analysis then
     return {}
   end
+  -- Prefer same-product candidates (any version), which subsumes the exact
+  -- same-version match: this is what lets "Pro-L" be upgraded to "Pro-L 2" (or
+  -- "Kick" to "Kick 2") when both releases are installed, instead of only ever
+  -- offering the identical version back. Newest version + best protocol ranks
+  -- first, so the auto-selected replacement is the upgrade.
   local list = {}
   for _, c in ipairs(pool) do
-    if up_matching.candidate_matches(c, old_analysis) then
+    if up_matching.candidate_matches_family(c, old_analysis) then
       table.insert(list, c)
     end
   end
-  if #list > 0 then
-    table.sort(list, function(a, b) return up_util.rank(a) > up_util.rank(b) end)
-    return list
-  end
-  for _, c in ipairs(pool) do
-    if up_matching.candidate_matches_loose(c, old_analysis) then
-      table.insert(list, c)
+  if #list == 0 then
+    -- Fall back to the version/name-flexible token match for broken/missing
+    -- plugins (vendor-prefix or artist-suffix asymmetry, e.g. Reaktor5 ->
+    -- Reaktor6, "Kick - Nicky Romero" -> "Kick 2", FF Pro MB -> Pro-MB).
+    for _, c in ipairs(pool) do
+      if up_matching.candidate_matches_loose(c, old_analysis) then
+        table.insert(list, c)
+      end
     end
   end
   if #list > 0 then

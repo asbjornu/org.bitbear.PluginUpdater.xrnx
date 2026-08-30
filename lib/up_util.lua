@@ -19,7 +19,13 @@ end
 
 function up_util.is_native_path(path)
   if type(path) ~= "string" then return false end
-  return path:lower():find("native") ~= nil
+  -- Renoise's built-in (non-plugin) devices live under the "Native/" namespace,
+  -- e.g. "Audio/Effects/Native/Gainer". Match that namespace only -- not the
+  -- bare word "native", which also appears in vendor names such as
+  -- "Native Instruments" and would wrongly exclude every plugin from that vendor
+  -- (e.g. Reaktor) from the candidate pool, so a newer version could never be
+  -- offered as an upgrade.
+  return path:lower():find("native[/\\]") ~= nil
 end
 
 function up_util.is_plugin_path(path)
@@ -73,6 +79,9 @@ function up_util.token_set(s)
   local set = {}
   for tok in t:gmatch("[%w%.]+") do
     local w = tok:gsub("[%.%-]", "")
+    -- Strip a version suffix that is glued to the product word (e.g. "reaktor5"
+    -- -> "reaktor"), so major-version variants still share a token and match.
+    w = w:gsub("%d+$", "")
     if #w > 0 then set[w] = true end
   end
   return set
