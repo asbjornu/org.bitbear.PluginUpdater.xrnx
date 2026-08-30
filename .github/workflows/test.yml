@@ -18,7 +18,7 @@ jobs:
           luaVersion: "5.1"
 
       - name: Install LuaRocks
-        uses: leafo/gh-actions-luarocks@v4
+        uses: leafo/gh-actions-luarocks@v6
 
       - name: Install dev dependencies from rockspec
         run: luarocks install --deps-only ./pluginupdater-dev-0.0.1-1.rockspec
