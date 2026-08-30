@@ -26,8 +26,7 @@ local up_matching  = require("up_matching")
 local up_preset    = require("up_preset")
 local up_songxml   = require("up_songxml")
 local up_inventory = require("up_inventory")
-local up_core      = require("up_core") -- also instruments up_swap for coverage
-_ = up_core
+local up_core      = require("up_core") -- loaded so its module is counted in coverage
 local up_zip       = require("up_zip")
 
 local failures = 0
