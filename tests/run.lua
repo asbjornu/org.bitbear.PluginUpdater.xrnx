@@ -14,6 +14,27 @@ local root = arg[0]:match("(.*)/tests/run%.lua$")
 if not root or root == "" then root = "." end
 package.path = (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
 
+-- Renoise runs tool Lua in strict mode: reading any global that has no value is a
+-- hard error. The suite must fail the same way, otherwise undeclared-global bugs
+-- (e.g. the LibDeflate `LibStub`/`arg` probes) only blow up inside Renoise and
+-- never surface here. Enable a matching strict mode, then declare the few globals
+-- the vendored dependency expects from a standalone Lua CLI but which do not exist
+-- in Renoise. This mirrors the shims in main.lua. `rawset` is used so the strict
+-- writer is not itself tripped, and the values are non-nil so the strict reader is
+-- satisfied.
+do
+  local g = _G
+  setmetatable(g, {
+    __index = function(_, k)
+      if rawget(g, k) ~= nil then return rawget(g, k) end
+      error("variable '" .. k .. "' is not declared", 2)
+    end,
+    __newindex = function(_, k, v) rawset(g, k, v) end,
+  })
+end
+rawset(_G, "LibStub", false)
+rawset(_G, "arg", false)
+
 -- Mock the Renoise global. The fixture path is resolved from the script location
 -- so the suite runs regardless of the current working directory.
 local fixture = root .. "/tests/fixtures/sample.xrns"
@@ -28,6 +49,7 @@ local up_songxml   = require("up_songxml")
 local up_inventory = require("up_inventory")
 local up_core      = require("up_core") -- loaded so its module is counted in coverage
 local up_zip       = require("up_zip")
+local up_slicer    = require("up_slicer") -- pure logic; safe to load headlessly
 
 local failures = 0
 local function check(cond, msg)
