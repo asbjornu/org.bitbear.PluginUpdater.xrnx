@@ -17,10 +17,14 @@
 -- `arg` is a CLI convenience table and may be absent in embedded interpreters,
 -- so guard it (type() is safe on nil) for the claimed "any Lua 5.1+" portability.
 local src = (type(arg) == "table" and arg[0]) or "."
-if not src:match("^/") then
+-- Normalise Windows separators first so the absolute-path checks below work on
+-- any platform. An absolute path is Unix-style (^/), a Windows drive path
+-- (C:/...), or a UNC share (//server/...); only a relative path is anchored to
+-- $PWD, which keeps the runner portable to Windows (Renoise is commonly run there).
+src = src:gsub("\\", "/")
+if not (src:match("^/") or src:match("^[A-Za-z]:/")) then
   src = (os.getenv("PWD") or ".") .. "/" .. src
 end
-src = src:gsub("\\", "/")
 -- Collapse "/./" segments so the suite still resolves the repo root when it is
 -- invoked as e.g. "lua ./tests/run.lua" from a non-root working directory
 -- (arg[0] then holds "/abs/path/./tests/run.lua", which the pattern wouldn't
