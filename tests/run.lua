@@ -23,22 +23,28 @@ local root = src:match("(.*)/tests/run%.lua$")
 if not root or root == "" then root = "." end
 package.path = (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
 
--- Renoise runs tool Lua in strict mode: reading any global that has no value is a
--- hard error. The suite must fail the same way, otherwise undeclared-global bugs
--- (e.g. the LibDeflate `LibStub`/`arg` probes) only blow up inside Renoise and
--- never surface here. Enable a matching strict mode, then declare the few globals
--- the vendored dependency expects from a standalone Lua CLI but which do not exist
--- in Renoise. This mirrors the shims in main.lua. `rawset` is used so the strict
--- writer is not itself tripped, and the values are non-nil so the strict reader is
--- satisfied.
+-- Renoise runs tool Lua in strict mode: reading *or writing* any undeclared
+-- global is a hard error. The suite must fail the same way, otherwise
+-- undeclared-global bugs (e.g. the LibDeflate `LibStub`/`arg` probes) only blow
+-- up inside Renoise and never surface here. Enable a matching strict mode. A small
+-- allow-list of globals that are *intentionally* created -- the vendored
+-- LibDeflate, plus the `renoise`/`LibStub`/`arg` shims this runner provides -- is
+-- pre-declared so the strict writer only flags genuine accidental global
+-- assignments in our own code.
 do
   local g = _G
+  local declared = { LibDeflate = true, LibStub = true, arg = true, luacov = true, renoise = true }
   setmetatable(g, {
     __index = function(_, k)
-      if rawget(g, k) ~= nil then return rawget(g, k) end
+      if rawget(g, k) ~= nil or declared[k] then return rawget(g, k) end
       error("variable '" .. k .. "' is not declared", 2)
     end,
-    __newindex = function(_, k, v) rawset(g, k, v) end,
+    __newindex = function(_, k, v)
+      if rawget(g, k) == nil and not declared[k] then
+        error("assign to undeclared global '" .. k .. "'", 2)
+      end
+      rawset(g, k, v)
+    end,
   })
 end
 rawset(_G, "LibStub", false)

@@ -36,8 +36,8 @@ previous preset/state.
    `active_preset_data` directly; (b) if the formats differ, load a
    same-named factory preset as a base and overlay the old plugin's
    captured parameter values (matched by name); (c) if no transfer method
-    succeeds, keep the new plugin at default state — strictly better than a
-    missing plugin. The device enabled/bypass flag is preserved.
+   succeeds, keep the new plugin at default state — strictly better than a
+   missing plugin. The device enabled/bypass flag is preserved.
   - **Automation is preserved.** Plugin automation (track-device and
     instrument) is carried across the replacement, matched by parameter
     name: track devices rebind their live automation objects onto the new

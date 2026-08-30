@@ -95,9 +95,15 @@ function up_zip.extract(zip_path, entry_name)
     or data:byte(local_offset + 2) ~= 0x03 or data:byte(local_offset + 3) ~= 0x04 then
     return nil
   end
+  -- Guard against a truncated/corrupt archive: the local-header fields we read
+  -- below and the compressed-data window must lie fully inside the file,
+  -- otherwise the byte reads would receive nil and throw instead of returning
+  -- nil (which is what callers expect for an unreadable archive).
+  if local_offset + 30 > #data then return nil end
   local name_len = u16(data, local_offset + 26)
   local extra_len = u16(data, local_offset + 28)
   local start = local_offset + 30 + name_len + extra_len
+  if start > #data or start + comp_size - 1 > #data then return nil end
   local comp = data:sub(start, start + comp_size - 1)
   if method == 0 then
     return comp

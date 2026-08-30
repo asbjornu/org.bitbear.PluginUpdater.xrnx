@@ -87,13 +87,17 @@ jobs:
 
       - name: Update vendored LibDeflate
         run: |
-          url="https://raw.githubusercontent.com/SafeteeWoW/LibDeflate/master/LibDeflate.lua"
+          # Pinned to a specific upstream commit rather than the moving `master`
+          # branch, so the scheduled job cannot silently import unreviewed
+          # upstream changes (supply-chain safety). Bump this SHA intentionally
+          # when a LibDeflate update is wanted.
+          url="https://raw.githubusercontent.com/SafeteeWoW/LibDeflate/afc3b78d12fb3bcfa6b21e5332031ad3d7572e19/LibDeflate.lua"
           tmp="$(mktemp)"
           curl -fsSL "$url" -o "$tmp"
           if ! cmp -s "$tmp" lib/LibDeflate.lua; then
             cp "$tmp" lib/LibDeflate.lua
             echo "CHANGED=true" >> "$GITHUB_ENV"
-            echo "Updated vendored LibDeflate from upstream master."
+            echo "Updated vendored LibDeflate to pinned commit afc3b78."
           else
             echo "LibDeflate already up to date."
           fi
