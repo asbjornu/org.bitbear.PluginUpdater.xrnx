@@ -10,18 +10,13 @@ local up_zip = {}
 -- kept up to date by .github/workflows/luarocks-update.yml.
 
 -- LibDeflate optionally registers itself with the World of Warcraft "LibStub"
--- global. Renoise has no such global and runs Lua under strict mode, which
--- errors when LibDeflate.lua reads the undeclared global. Declare "LibStub"
--- (as nil) before loading so the read is permitted; when it is nil LibDeflate
--- simply skips the registration. This keeps lib/LibDeflate.lua pristine so the
--- scheduled auto-update can replace it unchanged.
-do
-  local ok, mt = pcall(debug.getmetatable, _G)
-  if ok and mt and mt.__declared then
-    mt.__declared["LibStub"] = true
-  end
-  rawset(_G, "LibStub", rawget(_G, "LibStub"))
-end
+-- global, and also probes `_G.arg` for its CLI harness. Renoise has neither and
+-- runs Lua under strict mode, which errors on those undeclared reads. Declare
+-- both as a benign `false` via rawset so the reads are permitted and LibDeflate
+-- simply skips its registration/CLI harness. This keeps lib/LibDeflate.lua
+-- pristine so the scheduled auto-update can replace it unchanged.
+rawset(_G, "LibStub", false)
+rawset(_G, "arg", false)
 
 local LibDeflate = require("LibDeflate")
 
@@ -36,75 +31,90 @@ local function u32(s, i)
     + s:byte(i + 3) * 16777216
 end
 
-local function find_eocd(data)
-  -- The End Of Central Directory record sits at the very end of the archive
-  -- (optionally followed by a comment). Scan backwards from the end so we find
-  -- the *last* occurrence of the signature; a naive forward scan could match the
-  -- same 4 bytes inside compressed file data or inside the trailing comment.
-  -- Validate the comment length so a coincidental match inside the comment is
-  -- rejected (the record must end exactly at the last byte of the file).
-  local maxp = #data - 21
-  local minp = math.max(1, #data - 65557)
+local function find_eocd(tail, base, size)
+  -- `tail` holds the final bytes of the archive (starting at absolute 1-based
+  -- offset `base`); the End Of Central Directory record sits at the very end
+  -- (optionally followed by a comment). Scan backwards so we find the *last*
+  -- occurrence of the signature; a forward scan could match the same 4 bytes
+  -- inside compressed data or inside the trailing comment. Validate the comment
+  -- length so a coincidental match inside the comment is rejected.
+  local maxp = #tail - 21
+  local minp = math.max(1, #tail - 65557)
   for i = maxp, minp, -1 do
-    if data:byte(i) == 0x50 and data:byte(i + 1) == 0x4b
-      and data:byte(i + 2) == 0x05 and data:byte(i + 3) == 0x06 then
-      local comment_len = u16(data, i + 20)
-      if i + 21 + comment_len == #data then
-        return i
+    if tail:byte(i) == 0x50 and tail:byte(i + 1) == 0x4b
+      and tail:byte(i + 2) == 0x05 and tail:byte(i + 3) == 0x06 then
+      local comment_len = u16(tail, i + 20)
+      if (base + i - 1) + 21 + comment_len == size then
+        return base + i - 1
       end
     end
   end
   return nil
 end
-
--- Extract `entry_name` from the zip archive at `zip_path` and return its
--- contents as a string, or nil if the entry cannot be read.
 function up_zip.extract(zip_path, entry_name)
   local f = io.open(zip_path, "rb")
   if not f then return nil end
-  local data = f:read("*a")
-  f:close()
-  if not data or #data == 0 then return nil end
+  local size = f:seek("end")
+  if not size or size < 22 then f:close(); return nil end
 
-  local eocd = find_eocd(data)
-  if not eocd then return nil end
-  local cd_offset = u32(data, eocd + 16) + 1
+  -- Seek-based reader: only the EOCD tail, the central directory, the matching
+  -- local header, and the (small) target entry are read -- never the whole
+  -- archive. Renoise `.xrns` files can embed large samples, so loading the
+  -- entire zip into memory would waste RAM and could stall the UI.
+  local function read_at(pos, n)
+    f:seek("set", pos - 1)
+    return f:read(n)
+  end
 
-  local p = cd_offset
+  local tail_len = math.min(size, 65557)
+  local base = size - tail_len + 1
+  f:seek("set", base - 1)
+  local tail = f:read(tail_len)
+  local eocd = find_eocd(tail, base, size)
+  if not eocd then f:close(); return nil end
+
+  local rel = eocd - base + 1
+  local cd_offset = u32(tail, rel + 16) + 1
+  -- The central directory sits just before the EOCD signature; the bytes
+  -- between it and the signature are the (ignorable) comment.
+  if cd_offset < 1 or cd_offset >= eocd then f:close(); return nil end
+  local cd = read_at(cd_offset, eocd - cd_offset)
+  if not cd then f:close(); return nil end
+
+  local p = 1
   local method, comp_size, local_offset
-  while p + 46 <= #data do
-    if data:byte(p) ~= 0x50 or data:byte(p + 1) ~= 0x4b
-      or data:byte(p + 2) ~= 0x01 or data:byte(p + 3) ~= 0x02 then
+  while p + 46 <= #cd do
+    if cd:byte(p) ~= 0x50 or cd:byte(p + 1) ~= 0x4b
+      or cd:byte(p + 2) ~= 0x01 or cd:byte(p + 3) ~= 0x02 then
       break
     end
-    local name_len = u16(data, p + 28)
-    local extra_len = u16(data, p + 30)
-    local comment_len = u16(data, p + 32)
-    local name = data:sub(p + 46, p + 45 + name_len)
+    local name_len = u16(cd, p + 28)
+    local extra_len = u16(cd, p + 30)
+    local comment_len = u16(cd, p + 32)
+    local name = cd:sub(p + 46, p + 45 + name_len)
     if name == entry_name then
-      method = u16(data, p + 10)
-      comp_size = u32(data, p + 20)
-      local_offset = u32(data, p + 42) + 1
+      method = u16(cd, p + 10)
+      comp_size = u32(cd, p + 20)
+      local_offset = u32(cd, p + 42) + 1
       break
     end
     p = p + 46 + name_len + extra_len + comment_len
   end
-  if not method then return nil end
+  if not method then f:close(); return nil end
 
-  if data:byte(local_offset) ~= 0x50 or data:byte(local_offset + 1) ~= 0x4b
-    or data:byte(local_offset + 2) ~= 0x03 or data:byte(local_offset + 3) ~= 0x04 then
-    return nil
+  -- Read just the local header to locate the compressed-data window precisely.
+  local lh = read_at(local_offset, 30)
+  if not lh or lh:byte(1) ~= 0x50 or lh:byte(2) ~= 0x4b
+    or lh:byte(3) ~= 0x03 or lh:byte(4) ~= 0x04 then
+    f:close(); return nil
   end
-  -- Guard against a truncated/corrupt archive: the local-header fields we read
-  -- below and the compressed-data window must lie fully inside the file,
-  -- otherwise the byte reads would receive nil and throw instead of returning
-  -- nil (which is what callers expect for an unreadable archive).
-  if local_offset + 30 > #data then return nil end
-  local name_len = u16(data, local_offset + 26)
-  local extra_len = u16(data, local_offset + 28)
+  local name_len = u16(lh, 27)
+  local extra_len = u16(lh, 29)
   local start = local_offset + 30 + name_len + extra_len
-  if start > #data or start + comp_size - 1 > #data then return nil end
-  local comp = data:sub(start, start + comp_size - 1)
+  if start > size or start + comp_size - 1 > size then f:close(); return nil end
+  local comp = read_at(start, comp_size)
+  f:close()
+  if not comp then return nil end
   if method == 0 then
     return comp
   elseif method == 8 then
