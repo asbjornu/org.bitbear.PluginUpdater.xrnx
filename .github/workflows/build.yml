@@ -37,6 +37,12 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y lua-check
+        # On Debian/Ubuntu the `lua-check` package ships /usr/bin/luacheck, but
+        # fall back to LuaRocks (the canonical install method) if it is absent.
+        if ! command -v luacheck >/dev/null 2>&1; then
+          sudo apt-get install -y luarocks
+          sudo luarocks install luacheck
+        fi
         luacheck --version
     - name: luacheck
       run: luacheck .
