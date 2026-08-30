@@ -9,6 +9,20 @@ local up_zip = {}
 -- LibDeflate is vendored from https://github.com/SafeteeWoW/LibDeflate and is
 -- kept up to date by .github/workflows/luarocks-update.yml.
 
+-- LibDeflate optionally registers itself with the World of Warcraft "LibStub"
+-- global. Renoise has no such global and runs Lua under strict mode, which
+-- errors when LibDeflate.lua reads the undeclared global. Declare "LibStub"
+-- (as nil) before loading so the read is permitted; when it is nil LibDeflate
+-- simply skips the registration. This keeps lib/LibDeflate.lua pristine so the
+-- scheduled auto-update can replace it unchanged.
+do
+  local ok, mt = pcall(debug.getmetatable, _G)
+  if ok and mt and mt.__declared then
+    mt.__declared["LibStub"] = true
+  end
+  rawset(_G, "LibStub", rawget(_G, "LibStub"))
+end
+
 local LibDeflate = require("LibDeflate")
 
 local function u16(s, i)
