@@ -17,10 +17,6 @@ local up_zip = require("up_zip")
 
 local _cache = { file = nil, data = nil }
 
-local function quote_arg(s)
-  return '"' .. tostring(s):gsub('"', '\\"') .. '"'
-end
-
 local function read_song_xml(song)
   local ok_app, app = pcall(function() return renoise.app() end)
   if not ok_app or not app then
@@ -33,35 +29,17 @@ local function read_song_xml(song)
   if _cache.file == path and _cache.data then
     return _cache.data
   end
-  -- Prefer the pure-Lua zip reader (no system dependency on `unzip`).
+  -- Pure-Lua ZIP reader only: no system dependency, and no shell-out (which
+  -- would be a command-injection risk on `app.song_filename`). Renoise `.xrns`
+  -- files use the stored or deflate methods, both of which this covers; if
+  -- extraction fails we simply report that no XML could be recovered.
   local ok_z, xml = pcall(function() return up_zip.extract(path, "Song.xml") end)
-  if not (ok_z and xml and xml ~= "") then
-    -- Fall back to streaming via `unzip` when it happens to be available.
-    local cmd = "unzip -p " .. quote_arg(path) .. " Song.xml 2>/dev/null"
-    local ok_p, f = pcall(function() return io.popen(cmd, "r") end)
-    if ok_p and f then
-      xml = f:read("*a")
-      pcall(function() f:close() end)
-    end
-    if not xml or xml == "" then
-      local tmp = os.tmpname()
-      local ec = os.execute("unzip -o -p " .. quote_arg(path) .. " Song.xml > " .. quote_arg(tmp) .. " 2>/dev/null")
-      local tf = io.open(tmp, "r")
-      if tf then
-        xml = tf:read("*a")
-        tf:close()
-      end
-      pcall(function() os.remove(tmp) end)
-      if (not xml or xml == "") and ec ~= 0 then
-        xml = nil
-      end
-    end
-  end
-  if xml and xml ~= "" then
+  if ok_z and xml and xml ~= "" then
     _cache.file = path
     _cache.data = xml
+    return xml
   end
-  return xml
+  return nil
 end
 
 -- Parse a Song.xml string into per-instrument plugin identities, keyed by

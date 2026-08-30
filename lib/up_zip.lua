@@ -23,11 +23,21 @@ local function u32(s, i)
 end
 
 local function find_eocd(data)
+  -- The End Of Central Directory record sits at the very end of the archive
+  -- (optionally followed by a comment). Scan backwards from the end so we find
+  -- the *last* occurrence of the signature; a naive forward scan could match the
+  -- same 4 bytes inside compressed file data or inside the trailing comment.
+  -- Validate the comment length so a coincidental match inside the comment is
+  -- rejected (the record must end exactly at the last byte of the file).
+  local maxp = #data - 21
   local minp = math.max(1, #data - 65557)
-  for i = minp, #data - 21 do
+  for i = maxp, minp, -1 do
     if data:byte(i) == 0x50 and data:byte(i + 1) == 0x4b
       and data:byte(i + 2) == 0x05 and data:byte(i + 3) == 0x06 then
-      return i
+      local comment_len = u16(data, i + 20)
+      if i + 21 + comment_len == #data then
+        return i
+      end
     end
   end
   return nil

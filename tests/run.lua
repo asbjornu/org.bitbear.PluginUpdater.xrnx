@@ -10,7 +10,16 @@
 -- scan wired to a mocked song. Each library file is also compile-checked.
 ------------------------------------------------------------------------------
 
-local root = arg[0]:match("(.*)/tests/run%.lua$")
+-- Resolve the repo root so the suite is location-independent: it must work no
+-- matter the current working directory. `arg[0]` can be a relative path, so
+-- anchor it to $PWD when needed, normalise separators, then strip the
+-- "/tests/run.lua" suffix to reach the repo root.
+local src = arg[0] or "."
+if not src:match("^/") then
+  src = (os.getenv("PWD") or ".") .. "/" .. src
+end
+src = src:gsub("\\", "/")
+local root = src:match("(.*)/tests/run%.lua$")
 if not root or root == "" then root = "." end
 package.path = (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
 
