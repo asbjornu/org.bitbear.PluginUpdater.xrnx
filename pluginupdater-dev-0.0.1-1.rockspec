@@ -8,9 +8,8 @@ description = {
    license = "MIT",
 }
 dependencies = {
-   "luacov",
-   "luacov-reporter-lcov",
-}
+   "luacov 0.17.0-1",
+   "luacov-reporter-lcov 0.2-0",}
 build = {
    type = "none",
 }
