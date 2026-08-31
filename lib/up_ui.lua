@@ -3,6 +3,7 @@ local up_slicer = require("up_slicer")
 local up_util = require("up_util")
 local up_inventory = require("up_inventory")
 local up_matching = require("up_matching")
+local up_preset = require("up_preset")
 
 local PLUGIN_ROWS_VISIBLE = 12
 local LIST_HEIGHT = 340
@@ -46,6 +47,66 @@ local function entry_sig(rec)
     .. tostring(rec.device_name) .. "|" .. tostring(rec.device_path)
 end
 
+-- Resolve the plugin's human-readable preset/ensemble name for display. Prefer
+-- an explicit preset name (mapped from the live device's active preset), then a
+-- "file://.../Name.ext" ensemble path embedded in the opaque state chunk (e.g.
+-- Reaktor's loaded ensemble), then -- for plugins that failed to load -- the
+-- Renoise instrument name. Missing plugins expose no preset API, so the instrument
+-- name is the only remaining hint; it often carries the patch, either in
+-- parentheses ("VST: Reaktor5 (Make It Bright)") or as a user-given label
+-- ("Dark Dreams 1"). We surface that, but never the bare plugin name itself
+-- ("Reaktor5"), which would wrongly read as the replacement's preset.
+local function rec_preset_name(rec)
+  -- Explicit preset recovered from the plugin's own state: the actual preset name
+  -- (healthy plugin) or the loaded ensemble ("Razor" for a missing Reaktor).
+  local explicit
+  if type(rec.active_preset_name) == "string" and rec.active_preset_name ~= "" then
+    explicit = rec.active_preset_name
+  elseif type(rec.active_preset_data) == "string" and rec.active_preset_data ~= "" then
+    explicit = up_preset.extract_name({ active_preset_data = rec.active_preset_data })
+  end
+
+  -- For a missing/recovered plugin the live API exposes no real preset, so the
+  -- user's instrument name is the meaningful label (e.g. "Dark Dreams 1", or
+  -- "Make It Bright" from "VST: Reaktor5 (Make It Bright)"). Prefer that over the
+  -- bare ensemble name and keep the ensemble ("Razor") as a secondary detail: the
+  -- preset name must be preserved and carried over, not replaced by the synth name.
+  if (rec.broken or rec.recovered) and rec.instrument_name then
+    local instr_label = up_util.instrument_preset_label(rec.instrument_name,
+      rec.analysis and rec.analysis.protocol, rec.analysis)
+    if instr_label and instr_label ~= "" then
+      if explicit and explicit ~= "" and explicit ~= instr_label then
+        -- Ensemble first, then the user's preset name: "Razor: Dark Dreams 1".
+        return explicit .. ": " .. instr_label
+      end
+      return instr_label
+    end
+  end
+
+  if explicit and explicit ~= "" then
+    return explicit
+  end
+
+  -- Last resort (healthy plugins with no preset state): use the instrument name
+  -- when it carries a real preset label, e.g. a parenthetical "Make It Bright".
+  if rec.kind == "instrument" and type(rec.instrument_name) == "string" and rec.instrument_name ~= "" then
+    local paren = rec.instrument_name:match("%(([^()]+)%)")
+    if paren and paren:match("%S") then
+      return paren:gsub("%s+", " "):match("^%s*(.-)%s*$")
+    end
+    local proto = rec.analysis and rec.analysis.protocol
+    local extra = up_util.strip_redundant_prefix(rec.instrument_name, proto, rec.analysis)
+    if extra and extra ~= "" then
+      local et = up_util.token_set(extra)
+      local bt = up_util.token_set(rec.analysis and rec.analysis.base or "")
+      if not (et and next(et) and up_util.token_subset(et, bt)) then
+        return extra
+      end
+    end
+  end
+  return nil
+end
+
 local function old_label(rec)
   local proto = rec.analysis and rec.analysis.protocol
   local plugin = up_util.format_plugin(rec.device_name, proto)
@@ -56,14 +117,7 @@ local function old_label(rec)
       return "?"
     end
   end
-  local preset
-  if rec.kind == "instrument" then
-    preset = rec.instrument_name
-  elseif rec.active_preset_name then
-    preset = rec.active_preset_name
-  elseif rec.active_preset then
-    preset = rec.active_preset
-  end
+  local preset = rec_preset_name(rec)
   if preset and preset ~= "" then
     local extra = up_util.strip_redundant_prefix(preset, proto, rec.analysis)
     if extra and extra ~= "" then
@@ -482,8 +536,18 @@ function up_ui.fill_row(result, preset_value)
   local rec = result.entry
   local cands = result.candidates or {}
   local items = { "Keep current: " .. old_label(rec) }
+  -- Show the preset that will carry over to the replacement, so the user can see
+  -- the upgrade keeps their patch (e.g. "Reaktor 6 (Make It Bright)").
+  local carry = rec_preset_name(rec)
   for _, c in ipairs(cands) do
-    table.insert(items, up_util.format_plugin(c.name, c.protocol))
+    local label = up_util.format_plugin(c.name, c.protocol)
+    if carry and carry ~= "" then
+      local extra = up_util.strip_redundant_prefix(carry, c.protocol, c)
+      if extra and extra ~= "" then
+        label = string.format("%s (%s)", label, extra)
+      end
+    end
+    table.insert(items, label)
   end
   rv.popup.items = items
   local v = preset_value or auto_select_index(cands, rec)
@@ -759,6 +823,40 @@ function up_ui.do_upgrade()
         end
         coroutine.yield()
       end
+      -- Re-read each upgraded row's current plugin in place. This must run inside
+      -- the coroutine (yielding between rows): doing it all at once in on_done for
+      -- many heavy plugins re-reads every preset chunk at once and trips Renoise's
+      -- script-busy watchdog. Keep the "Replace with" dropdown and Result text as-is.
+      local can_refresh = up_ui._dialog
+        and pcall(function() return up_ui._dialog.visible end)
+      if can_refresh then
+        -- Count the rows that need refreshing so the status text can show progress.
+        local n_refresh = 0
+        for _, s in ipairs(selected) do
+          local status = s.result.status or ""
+          if string.sub(status, 1, 8) == "upgraded" and s.rv and s.rv.old_tf then
+            n_refresh = n_refresh + 1
+          end
+        end
+        local j = 0
+        for _, s in ipairs(selected) do
+          if up_ui._abort then break end
+          local status = s.result.status or ""
+          if string.sub(status, 1, 8) == "upgraded" and s.rv and s.rv.old_tf then
+            j = j + 1
+            if up_ui._status_text then
+              up_ui._status_text.text = string.format(
+                "Refreshing %d/%d: %s", j, n_refresh, old_label(s.result.entry))
+            end
+            local new_rec = up_ui.reinspect_entry(s.result.entry)
+            if new_rec then
+              s.rv.old_tf.text = old_label(new_rec)
+              s.result.entry = new_rec
+            end
+          end
+          coroutine.yield()
+        end
+      end
     end,
     function()
       local aborted = up_ui._abort
@@ -777,22 +875,9 @@ function up_ui.do_upgrade()
         up_ui._upgrade_btn.active = true
       end
       up_ui._upgrade_notifier = nil
-      -- Update each upgraded row's "Current plugin" in place; keep the
-      -- "Replace with" dropdown and the "Result" text untouched.
-      local can_refresh = up_ui._dialog
-        and pcall(function() return up_ui._dialog.visible end)
-      if can_refresh then
-        for _, s in ipairs(selected) do
-          local status = s.result.status or ""
-          if string.sub(status, 1, 8) == "upgraded" and s.rv and s.rv.old_tf then
-            local new_rec = up_ui.reinspect_entry(s.result.entry)
-            if new_rec then
-              s.rv.old_tf.text = old_label(new_rec)
-              s.result.entry = new_rec
-            end
-          end
-        end
-      end
+      -- The per-row reinspection that refreshes each upgraded row's "Current plugin"
+      -- label is done inside the coroutine (yielding between rows) so it never runs
+      -- as one big synchronous block. Here we just restore the rest of the UI.
       if up_ui._status_text then
         up_ui._status_text.text = (aborted and "Stopped. " or "") .. up_ui.summary()
       end

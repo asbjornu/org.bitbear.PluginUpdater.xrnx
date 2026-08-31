@@ -75,18 +75,14 @@ function up_songxml.parse_instruments(xml)
     return out
   end
   local idx = 0
-  -- Iterate each real <Instrument> (plain or with attributes). A tag is only an
-  -- instrument open when "Instrument" is immediately followed by ">" or whitespace
-  -- (attributes); this excludes <InstrumentGroup> wrappers, which would otherwise be
-  -- matched as an instrument open tag and swallow the first inner <Instrument> up to
-  -- its own </Instrument>, dropping that instrument. Requiring ">" or a space right
-  -- after "Instrument" (never a letter) excludes groups at the match level while
-  -- still supporting attributes. We also index each entry by name/display/identifier
-  -- so callers can look a plugin up by the live instrument's name -- robust against
-  -- reordering or non-plugin instruments (e.g. ext. MIDI) that shift the indices
-  -- between the song and its Song.xml.
-  for block in xml:gmatch("<Instrument[%s>][^<>]*(.-)</Instrument>") do
-    idx = idx + 1
+  -- Tolerate attributes on the tags and skip <InstrumentGroup> wrappers (which
+  -- would otherwise desync the index from song.instruments). We also index each
+  -- entry by name/display/identifier so callers can look a plugin up by the live
+  -- instrument's name -- robust against any reordering or non-plugin instruments
+  -- (e.g. ext. MIDI) that shift the indices between the song and its Song.xml.
+  for open, block in xml:gmatch("<(Instrument[^>]*)>(.-)</Instrument>") do
+    if not open:match("^Group") then
+      idx = idx + 1
       local ptype = block:match("<PluginType[^>]*>(.-)</PluginType>")
       if ptype then
         local identifier = block:match("<PluginIdentifier[^>]*>(.-)</PluginIdentifier>")
@@ -99,10 +95,7 @@ function up_songxml.parse_instruments(xml)
         -- surfacing it lets the tool show the preset even when the plugin itself
         -- failed to load on this machine (so the live API exposes no preset name).
         local preset_name
-        -- Tolerate attributes on <ParameterChunk> and surrounding whitespace before
-        -- the CDATA (real Song.xml may write <ParameterChunk preset="..."> or indent
-        -- the block), otherwise the ensemble/preset name would never be recovered.
-        local cdata = block:match("<ParameterChunk[^>]*>%s*<%!%[CDATA%[(.-)%]%]>%s*</ParameterChunk>")
+        local cdata = block:match("<ParameterChunk><%!%[CDATA%[(.-)%]%]></ParameterChunk>")
         if cdata then
           preset_name = up_preset.extract_name({ active_preset_data = cdata })
         end
@@ -121,6 +114,7 @@ function up_songxml.parse_instruments(xml)
         if sdisp then out[sdisp] = entry end
         if identifier then out[identifier] = entry end
       end
+    end
   end
   return out
 end

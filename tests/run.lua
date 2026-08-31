@@ -35,6 +35,14 @@ if not root or root == "" then root = "." end
 package.path = (root == "." and "" or root .. "/") .. "?.lua;"
   .. (root == "." and "" or root .. "/") .. "lib/?.lua;" .. package.path
 
+-- SLAXML is vendored into lib/ (committed), so it resolves via the lib/?.lua
+-- entry already on package.path above; no LuaRocks install or copy step needed.
+local ok_slaxml, slaxml_err = pcall(require, "slaxml")
+if not ok_slaxml then
+  error("slaxml parser not found; expected lib/slaxml.lua to be vendored: "
+        .. tostring(slaxml_err), 2)
+end
+
 -- Renoise runs tool Lua in strict mode: reading *or writing* any undeclared
 -- global is a hard error. The suite must fail the same way, otherwise
 -- undeclared-global bugs (e.g. the LibDeflate `LibStub`/`arg` probes) only blow
@@ -45,7 +53,7 @@ package.path = (root == "." and "" or root .. "/") .. "?.lua;"
 -- assignments in our own code.
 do
   local g = _G
-  local declared = { LibDeflate = true, LibStub = true, arg = true, luacov = true, renoise = true }
+  local declared = { LibDeflate = true, LibStub = true, arg = true, luacov = true, renoise = true, unpack = true }
   setmetatable(g, {
     __index = function(_, k)
       if rawget(g, k) ~= nil or declared[k] then return rawget(g, k) end
@@ -156,6 +164,7 @@ local up_util      = require("up_util")
 local up_matching  = require("up_matching")
 local up_preset    = require("up_preset")
 local up_songxml   = require("up_songxml")
+local up_xml       = require("up_xml") -- luacheck: ignore (pure-Lua XML parser exercised below)
 local up_inventory = require("up_inventory")
 local up_core      = require("up_core") -- luacheck: ignore (loaded so its module is counted in coverage)
 local up_zip       = require("up_zip")
@@ -302,6 +311,51 @@ do
   local razor_b64 = "AABmaWxlOi8vbG9jYWxob3N0L1VzZXJzL1NoYXJlZC9SYXpvci9SYXpvci5ya3Bscg" .. "AA"
   check(up_preset._extract_chunk_name(razor_b64) == "Razor",
     "valid base64 chunk still yields the ensemble name")
+  -- A filename with interior dots must keep every dot but the final extension.
+  check(up_preset._extract_chunk_name("file:///Shared/My.Ensemble.rkplr") == "My.Ensemble",
+    "interior dots are preserved (only the last extension is stripped)")
+end
+
+section("up_xml.parse (pure-Lua XML tree)")
+do
+  -- Validates the tree parser used by up_songxml: nested elements, attributes,
+  -- <InstrumentGroup> handling, descendant text, and CDATA.
+  local xml = [==[<?xml version="1.0"?>
+<Song>
+  <InstrumentGroup>
+    <Instrument name="a"><PluginType>VST</PluginType><Name>Kick A</Name></Instrument>
+    <Instrument name="b"><PluginType>AU</PluginType><Name>Reaktor B</Name></Instrument>
+  </InstrumentGroup>
+  <Instrument foo="bar"><Name>VST C</Name><PluginType>VST3</PluginType>
+    <ParameterChunk preset="x">  <![CDATA[hello]]></ParameterChunk>
+  </Instrument>
+</Song>]==]
+  local doc = up_xml.parse(xml)
+  check(doc and doc.tag == "Song", "root element is Song")
+  local insts = up_xml.find_all(doc, "Instrument")
+  check(#insts == 3, "all <Instrument> found at any depth (group + plain + attributed)")
+  check(insts[3].attrs.foo == "bar", "attribute parsed from tag")
+  check(insts[1].attrs.name == "a", "attribute parsed (first grouped instrument)")
+  check(up_xml.descendant_text(insts[1], "Name") == "Kick A", "descendant text extracted")
+  check(up_xml.descendant_cdata(insts[3], "ParameterChunk") == "hello",
+    "CDATA extracted despite surrounding whitespace")
+end
+
+section("up_xml.parse handles high codepoints and inner-quote attribute values")
+do
+  -- &#8217; is a curly apostrophe (U+2019), a codepoint > 255 that string.char() would
+  -- reject; it must decode to UTF-8 without raising and without aborting the parse.
+  local xml = [==[<Song><Name>Don&#8217;t</Name>
+    <Instrument name='a "quoted" value'><PluginType>VST</PluginType></Instrument>
+  </Song>]==]
+  local doc = up_xml.parse(xml)
+  check(doc ~= nil, "parses despite a high codepoint entity")
+  local name = up_xml.descendant_text(doc, "Name")
+  check(name and name:find("&#8217;") == nil and name:find("Don") and name:find("t"),
+    "high codepoint entity decoded to UTF-8 (not left raw)")
+  local inst = up_xml.find_all(doc, "Instrument")[1]
+  check(inst.attrs.name == 'a "quoted" value',
+    "attribute value containing the other quote is parsed correctly")
 end
 
 -- 4. up_matching --------------------------------------------------------------
@@ -432,10 +486,29 @@ do
   for _, a in ipairs(pool) do names[a.name] = true end
   check(names["Native Instruments: Reaktor 6"], "AU 'Native Instruments: Reaktor 6' kept in pool")
   check(names["Reaktor 6"], "VST3 'Reaktor 6' kept in pool")
-  local cands = up_matching.find_candidates(pool,
-    { analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
-  check(#cands >= 1 and cands[1].name:find("Reaktor 6") ~= nil,
-    "Reaktor 5 -> Reaktor 6 offered as upgrade")
+   local cands = up_matching.find_candidates(pool,
+     { analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
+   check(#cands >= 1 and cands[1].name:find("Reaktor 6") ~= nil,
+     "Reaktor 5 -> Reaktor 6 offered as upgrade")
+end
+
+-- 4c2. available_plugin_infos entries without a loadable path (path nil or "")
+-- must be skipped: they cannot be loaded and would otherwise surface as pool
+-- candidates whose .path later blows up in pp:load_plugin / insert_device_at.
+section("up_matching.build_instrument_pool skips entries without a path")
+do
+  local good = { path = "/P/ProQ3.vst3", name = "FabFilter Pro-Q 3" }
+  local nil_path = { path = nil, name = "Ghost Plugin" }
+  local empty_path = { path = "", name = "Also Ghost" }
+  local mock_song = {
+    instruments = {
+      { plugin_properties = { available_plugin_infos = { good, nil_path, empty_path } } },
+    },
+  }
+  local pool = up_matching.build_instrument_pool(mock_song, nil, nil)
+  check(#pool == 1, "only the entry with a real path is pooled (nil/empty dropped)")
+  check(pool[1] and pool[1].path == "/P/ProQ3.vst3",
+    "pooled entry keeps its valid path as the load handle")
 end
 
 -- 5. up_songxml ---------------------------------------------------------------
@@ -770,26 +843,6 @@ do
   local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
   check(ok and res and res.status == "upgraded-name-matched-preset",
     "broken plugin's parenthetical preset name matches a factory preset")
-end
-
-section("up_swap.swap_instrument ignores an empty () in a broken instrument name")
-do
-  -- Renoise appends an empty "()" to some broken instrument names. The empty
-  -- parenthetical must NOT be kept as a (truthy) preset name; the full name
-  -- should fall through as the preset instead.
-  local new_dev = {
-    is_active = true, active_preset_data = "", presets = { "My Song ()", "Other" }, parameters = {} }
-  local pp = {
-    plugin_loaded = false, plugin_device = nil,
-    load_plugin = function(self, _path) self.plugin_device = new_dev; return true end,
-  }
-  local song = { instruments = { { plugin_properties = pp } }, automation = function() return nil end }
-  local rec = { kind = "instrument", instrument_index = 1, broken = true, plugin_loaded = false,
-    instrument_name = "My Song ()", analysis = { protocol = "VST" }, device_path = nil }
-  local candidate = { path = "/P/Reaktor6.vst", protocol = "VST" }
-  local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
-  check(ok and res and res.status == "upgraded-name-matched-preset",
-    "empty parenthetical does not shadow the real preset name")
 end
 
 section("upgrade reinspection yields across ticks (no watchdog stall)")

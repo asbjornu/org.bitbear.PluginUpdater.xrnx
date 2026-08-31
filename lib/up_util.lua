@@ -237,7 +237,10 @@ function up_util.strip_redundant_prefix(preset, protocol, analysis)
     end
   end
   s = s:gsub("%b()", " ")
-  s = s:gsub("[%._%:%-]+", " ")
+  -- Note: colons are intentionally preserved (not folded to spaces) so a combined
+  -- "Ensemble: Preset" label like "Razor: Dark Dreams 1" survives intact; a leading
+  -- protocol-style tag is still stripped by the block above when it matches.
+  s = s:gsub("[%._%-]+", " ")
   local low = s:lower()
   for _, tok in ipairs(ARCH_TOKENS) do
     local st, en = low:find("%s*" .. tok .. "%s*")
@@ -255,6 +258,66 @@ function up_util.strip_redundant_prefix(preset, protocol, analysis)
     s = s:gsub("^%s*%S+%s*", "", 1)
   end
   return s:gsub("%s+", " "):match("^%s*(.-)%s*$")
+end
+
+-- Recover the user's preset label from an instrument's *name*, when that name is
+-- more than a restatement of the plugin's own identity. For a plugin that failed
+-- to load the live API exposes nothing, and Renoise reports the instrument name
+-- (e.g. "Instrument 03 (Dark Dreams 1)"), which is the only meaningful preset
+-- signal available. Examples:
+--   "Dark Dreams 1"                   -> "Dark Dreams 1"
+--   "Cinematic Pad 1"                 -> "Cinematic Pad 1"
+--   "VST: Reaktor5 (Make It Bright)"  -> "Make It Bright"
+--   "VST: Reaktor5"                   -> ""            (just the plugin itself)
+-- Unlike strip_redundant_prefix this PRESERVES parenthetical content, because that
+-- is exactly where the user's preset frequently lives.
+function up_util.instrument_preset_label(name, protocol, analysis)
+  local s = tostring(name or ""):match("^%s*(.-)%s*$")
+  if s == "" then return "" end
+  -- Drop a leading "PROTO: " (protocol) tag.
+  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+  if tag then
+    local t = tag:lower()
+    if t == (protocol and protocol:lower()) or CATEGORY[t] then
+      s = s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    end
+  end
+  -- Drop leading words that are part of the plugin's own product identity; stop at
+  -- the first word that is not the plugin, or at an opening parenthesis.
+  local base = (analysis and analysis.product) or ""
+  local base_tokens = {}
+  for t in base:lower():gmatch("[%w%.%-]+") do
+    local tok = t:gsub("[%.%-]", ""):gsub("%d+$", "")
+    if tok ~= "" then base_tokens[tok] = true end
+  end
+  local function is_plugin_word(w)
+    local n = 0
+    for wtok in w:gsub("[%.%-_]", " "):lower():gmatch("[^%s]+") do
+      n = n + 1
+      local ww = wtok:gsub("%d+$", "")
+      if ww == "" or not base_tokens[ww] then return false end
+    end
+    return n > 0
+  end
+  local cur = 1
+  while cur <= #s do
+    while cur <= #s and s:sub(cur, cur):match("%s") do cur = cur + 1 end
+    if cur > #s then break end
+    if s:sub(cur, cur) == "(" then break end
+    local j = cur
+    while j <= #s and s:sub(j, j):match("[%w%.%-]") do j = j + 1 end
+    local word = s:sub(cur, j - 1)
+    if is_plugin_word(word) then
+      cur = j
+    else
+      break
+    end
+  end
+  local rest = s:sub(cur):match("^%s*(.-)%s*$")
+  if not rest or rest == "" then return "" end
+  -- Drop a single surrounding pair of parentheses so the label reads cleanly.
+  rest = rest:match("^%(%s*(.-)%s*%)$") or rest
+  return rest
 end
 
 -- Unified human-readable name used for BOTH the "Current plugin" and

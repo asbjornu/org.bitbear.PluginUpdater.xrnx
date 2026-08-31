@@ -2,20 +2,23 @@ local up_preset = {}
 
 -- Pure-Lua base64 decoder (RFC 4648), used to read preset/ensemble names that
 -- plugins embed inside their opaque state chunk (group 4 chars -> 3 bytes).
-local function _b64decode(s)
-  local map = {}
+local _b64map = {}
+do
   local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-  for i = 1, #chars do map[chars:sub(i, i)] = i - 1 end
+  for i = 1, #chars do _b64map[chars:sub(i, i)] = i - 1 end
+end
+
+local function _b64decode(s)
   s = s:gsub("[^A-Za-z0-9+/=]", "")
   local out = {}
   local i = 1
   while i <= #s do
-    local a = map[s:sub(i, i)] or 0; i = i + 1
-    local b = map[s:sub(i, i)] or 0; i = i + 1
+    local a = _b64map[s:sub(i, i)] or 0; i = i + 1
+    local b = _b64map[s:sub(i, i)] or 0; i = i + 1
     local c = s:sub(i, i); i = i + 1
     local d = s:sub(i, i); i = i + 1
-    local ca = (c ~= "" and c ~= "=") and map[c] or nil
-    local da = (d ~= "" and d ~= "=") and map[d] or nil
+    local ca = (c ~= "" and c ~= "=") and _b64map[c] or nil
+    local da = (d ~= "" and d ~= "=") and _b64map[d] or nil
     local n = a * 262144 + b * 4096 + (ca or 0) * 64 + (da or 0)
     out[#out + 1] = string.char(math.floor(n / 65536) % 256)
     if ca then out[#out + 1] = string.char(math.floor(n / 256) % 256) end
@@ -30,8 +33,11 @@ end
 -- extension) as the preset/ensemble name.
 local function _scan_chunk_for_name(blob)
   local function base_of(url)
+    -- The capture already stops before the final ".ext", so return it directly.
+    -- A second strip would wrongly drop an interior dot (e.g. "My.Ensemble.rkplr"
+    -- -> "My.Ensemble", not "My").
     local b = url:match("([^/\\]+)%.%w+$")
-    if b and b ~= "" then return b:gsub("%.[^%.]+$", "") end
+    if b and b ~= "" then return b end
     return nil
   end
   for url in blob:gmatch("file://[^%z%s\"'<>]+") do
@@ -82,7 +88,12 @@ function up_preset.extract_name(device)
     if name and name ~= "" then
       return name
     end
-    name = pd:match('name="([^"]*)"')
+    -- Only a *bare* `name` attribute (preceded by a non-word, non-underscore
+    -- character, i.e. a real attribute boundary) is a candidate. Without this
+    -- guard the pattern matched the `name="..."` tail of a `*name="..."`
+    -- attribute such as `plugin_name="Serum"`, which would wrongly return the
+    -- plugin's name as the preset name and shadow the real preset.
+    name = pd:match('[^%w_]name="([^"]*)"')
     if name and name ~= "" then
       return name
     end
