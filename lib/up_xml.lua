@@ -20,9 +20,10 @@ local up_xml = {}
 
 local ok_slaxml, SLAXML = pcall(require, "slaxml")
 if not ok_slaxml or not SLAXML then
-  error("up_xml requires the vendored SLAXML parser (lib/slaxml.lua). The slaxml rockspec on "
-    .. "LuaRocks is broken, so it is committed directly into lib/; restore it from version "
-    .. "control with `git checkout -- lib/slaxml.lua`.", 2)
+  error("up_xml requires the vendored SLAXML parser (lib/slaxml.lua). It is committed directly "
+    .. "into lib/ (the slaxml rockspec on LuaRocks is broken, so do not install it from "
+    .. "LuaRocks). If the file is missing, restore it with `git checkout -- lib/slaxml.lua`; if "
+    .. "require still fails, ensure package.path includes the tool's lib/ directory.", 2)
 end
 
 -- Parse an XML string into its root element (or nil on empty/garbage input).

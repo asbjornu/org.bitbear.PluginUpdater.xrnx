@@ -298,6 +298,12 @@ do
     "falls back to <Name> in chunk")
   check(up_preset.extract_name({ active_preset_data = '<device name="InlineName"></device>' }) == "InlineName",
     "falls back to name=\"...\" attribute in chunk")
+
+  -- A `name=\"...\"` attribute must only match a real `name` attribute, not the
+  -- tail of e.g. `plugin_name=\"...\"`: otherwise the plugin name would shadow the
+  -- actual preset name.
+  check(up_preset.extract_name({ active_preset_data = '<device plugin_name="Serum" name="Init"></device>' }) == "Init",
+    "name=\"...\" attribute is not confused with plugin_name")
 end
 
 section("up_preset._extract_chunk_name skips binary blobs before decoding")
@@ -339,6 +345,26 @@ do
   check(up_xml.descendant_text(insts[1], "Name") == "Kick A", "descendant text extracted")
   check(up_xml.descendant_cdata(insts[3], "ParameterChunk") == "hello",
     "CDATA extracted despite surrounding whitespace")
+end
+
+section("up_xml require fails clearly when slaxml is missing (vendored, not LuaRocks)")
+do
+  -- up_xml requires the vendored lib/slaxml.lua at load time. When it cannot be
+  -- required (missing file / wrong package.path), the error must point at the
+  -- vendored copy and must NOT tell users to `luarocks install slaxml`.
+  local prev_xml = package.loaded["up_xml"]
+  local prev_slax = package.loaded["slaxml"]
+  package.loaded["up_xml"] = nil
+  package.loaded["slaxml"] = nil
+  package.preload["slaxml"] = function() error("forced slaxml load failure", 0) end
+  local ok, err = pcall(require, "up_xml")
+  package.preload["slaxml"] = nil
+  package.loaded["slaxml"] = prev_slax
+  package.loaded["up_xml"] = prev_xml
+  check(not ok, "require('up_xml') raises when slaxml is unavailable")
+  check(not ok and tostring(err):find("vendored SLAXML") ~= nil
+    and tostring(err):find("luarocks install slaxml") == nil,
+    "error references the vendored parser and not a LuaRocks install")
 end
 
 section("up_xml.parse handles high codepoints and inner-quote attribute values")
@@ -840,6 +866,42 @@ do
   check(dd and dd.active_preset_name == "Razor",
     "loaded Reaktor ensemble ('Razor') recovered as preset name")
   check(dd and dd.recovered and dd.broken, "marked recovered + broken")
+end
+
+section("up_inventory.scan recovers over a placeholder device with a blank name")
+do
+  -- A loaded-but-unresolvable plugin may leave a placeholder device whose name is
+  -- an empty string (truthy in Lua). apply_recovered must overwrite that blank name
+  -- with the authoritative display name from the saved song, not keep the empty one.
+  local mock_song = {
+    instruments = {
+      { name = "Dark Dreams 1", plugin_properties = {
+          plugin_loaded = true,
+          plugin_device = { device_path = nil, name = "", active_preset_data = "" } } },
+    },
+    tracks = {},
+  }
+  local recovery = {
+    [1] = { index = 1, instrument_name = "Dark Dreams 1",
+            protocol = "AU", identifier = "aumu:NiR5:-NI-",
+            display_name = "AU: Native Instruments: Reaktor5",
+            preset_name = "Razor" },
+    ["Dark Dreams 1"] = { index = 1, instrument_name = "Dark Dreams 1",
+            protocol = "AU", identifier = "aumu:NiR5:-NI-",
+            display_name = "AU: Native Instruments: Reaktor5",
+            preset_name = "Razor" },
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil, recovery)
+  local dd
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.instrument_name == "Dark Dreams 1" then dd = e end
+  end
+  check(dd ~= nil, "placeholder device surfaced")
+  check(dd and dd.device_name == "AU: Native Instruments: Reaktor5",
+    "blank device_name overwritten by the recovered display name")
+  check(dd and dd.analysis and dd.analysis.base:find("reaktor") ~= nil,
+    "recovered identity analysed as Reaktor5")
+  check(dd and dd.active_preset_name == "Razor", "recovered preset name carried over")
 end
 
 section("up_swap.swap_instrument handles missing (unloaded) plugin")
