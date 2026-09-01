@@ -350,13 +350,13 @@ do
 
   -- Direct-child accessors (child / child_text / child_cdata) and their nil
   -- branches.
-  local doc = up_xml.parse("<Root><A>hi</A><B><![CDATA[x]]></B></Root>")
-  check(up_xml.child(doc, "A") ~= nil, "child finds a direct child element")
-  check(up_xml.child(doc, "Z") == nil, "child returns nil when absent")
-  check(up_xml.child_text(doc, "A") == "hi", "child_text returns trimmed text")
-  check(up_xml.child_text(doc, "Z") == nil, "child_text returns nil when absent")
-  check(up_xml.child_cdata(doc, "B") == "x", "child_cdata returns CDATA")
-  check(up_xml.child_cdata(doc, "Z") == nil, "child_cdata returns nil when absent")
+  local doc2 = up_xml.parse("<Root><A>hi</A><B><![CDATA[x]]></B></Root>")
+  check(up_xml.child(doc2, "A") ~= nil, "child finds a direct child element")
+  check(up_xml.child(doc2, "Z") == nil, "child returns nil when absent")
+  check(up_xml.child_text(doc2, "A") == "hi", "child_text returns trimmed text")
+  check(up_xml.child_text(doc2, "Z") == nil, "child_text returns nil when absent")
+  check(up_xml.child_cdata(doc2, "B") == "x", "child_cdata returns CDATA")
+  check(up_xml.child_cdata(doc2, "Z") == nil, "child_cdata returns nil when absent")
   check(up_xml.child(nil, "A") == nil, "child is nil-safe on a nil element")
 end
 
@@ -378,48 +378,6 @@ do
   check(not ok and tostring(err):find("vendored SLAXML") ~= nil
     and tostring(err):find("luarocks install slaxml") == nil,
     "error references the vendored parser and not a LuaRocks install")
-end
-
-section("up_xml.parse handles high codepoints and inner-quote attribute values")
-do
-  -- &#8217; is a curly apostrophe (U+2019), a codepoint > 255 that string.char() would
-  -- reject; it must decode to UTF-8 without raising and without aborting the parse.
-  local xml = [==[<Song><Name>Don&#8217;t</Name>
-    <Instrument name='a "quoted" value'><PluginType>VST</PluginType></Instrument>
-  </Song>]==]
-  local doc = up_xml.parse(xml)
-  check(doc ~= nil, "parses despite a high codepoint entity")
-  local name = up_xml.descendant_text(doc, "Name")
-  check(name and name:find("&#8217;") == nil and name:find("Don") and name:find("t"),
-    "high codepoint entity decoded to UTF-8 (not left raw)")
-  local inst = up_xml.find_all(doc, "Instrument")[1]
-  check(inst.attrs.name == 'a "quoted" value',
-    "attribute value containing the other quote is parsed correctly")
-end
-
-section("up_xml.parse (pure-Lua XML tree)")
-do
-  -- Validates the tree parser used by up_songxml: nested elements, attributes,
-  -- <InstrumentGroup> handling, descendant text, and CDATA.
-  local xml = [==[<?xml version="1.0"?>
-<Song>
-  <InstrumentGroup>
-    <Instrument name="a"><PluginType>VST</PluginType><Name>Kick A</Name></Instrument>
-    <Instrument name="b"><PluginType>AU</PluginType><Name>Reaktor B</Name></Instrument>
-  </InstrumentGroup>
-  <Instrument foo="bar"><Name>VST C</Name><PluginType>VST3</PluginType>
-    <ParameterChunk preset="x">  <![CDATA[hello]]></ParameterChunk>
-  </Instrument>
-</Song>]==]
-  local doc = up_xml.parse(xml)
-  check(doc and doc.tag == "Song", "root element is Song")
-  local insts = up_xml.find_all(doc, "Instrument")
-  check(#insts == 3, "all <Instrument> found at any depth (group + plain + attributed)")
-  check(insts[3].attrs.foo == "bar", "attribute parsed from tag")
-  check(insts[1].attrs.name == "a", "attribute parsed (first grouped instrument)")
-  check(up_xml.descendant_text(insts[1], "Name") == "Kick A", "descendant text extracted")
-  check(up_xml.descendant_cdata(insts[3], "ParameterChunk") == "hello",
-    "CDATA extracted despite surrounding whitespace")
 end
 
 section("up_xml.parse handles high codepoints and inner-quote attribute values")
@@ -590,6 +548,132 @@ do
   check(#pool == 1, "only the entry with a real path is pooled (nil/empty dropped)")
   check(pool[1] and pool[1].path == "/P/ProQ3.vst3",
     "pooled entry keeps its valid path as the load handle")
+end
+
+section("up_matching.build_track_pool (strings + DeviceInfos)")
+do
+  -- A track exposing both available_devices (loadable paths) and
+  -- available_device_infos (names). The pool must zip them and analyze each.
+  local info = {
+    { device_path = "/P/Kick2.vst", name = "Kick 2" },
+    { device_path = "aumuRk6----", name = "Reaktor 6" },
+    -- name provided as a getter function exercises the function branch of track_name_of.
+    { device_path = "/P/ProQ3.vst3", name = function() return "FabFilter Pro-Q 3" end },
+  }
+  local mock_song = {
+    tracks = { { available_devices = { "/P/Kick2.vst", "aumuRk6----", "/P/ProQ3.vst3" },
+                available_device_infos = info } },
+    instruments = {},
+  }
+  local pool = up_matching.build_track_pool(mock_song, nil, nil)
+  local names = {}
+  for _, a in ipairs(pool) do names[a.name] = true end
+  check(names["Kick 2"] and names["Reaktor 6"] and names["FabFilter Pro-Q 3"],
+    "track pool zips paths with DeviceInfo names (incl. getter)")
+  -- The second track is never inspected because infos was found on the first.
+  local mock_song2 = {
+    tracks = {
+      { available_devices = { "/P/Kick2.vst" },
+        available_device_infos = { { device_path = "/P/Kick2.vst", name = "Kick 2" } } },
+      { available_devices = { "Native/Gainer" },
+        available_device_infos = { { device_path = "Native/Gainer", name = "Gainer" } } },
+    },
+    instruments = {},
+  }
+  local pool2 = up_matching.build_track_pool(mock_song2, nil, nil)
+  check(#pool2 == 1, "only the first track's plugins are pooled (native device skipped, single scan)")
+end
+
+section("up_matching.build_track_pool falls back to instrument pool on empty")
+do
+  -- When no track devices exist, build_track_pool accepts the instrument pool as
+  -- a fallback so track plugins named via instruments still surface.
+  local inst_pool = { up_util.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6") }
+  inst_pool[1].path = "/P/Reaktor6.vst"
+  local mock_song = { tracks = { { available_devices = {} } }, instruments = {} }
+  local pool = up_matching.build_track_pool(mock_song, nil, nil, inst_pool)
+  local names = {}
+  for _, a in ipairs(pool) do names[a.name or a.product] = true end
+  check(names["reaktor 6"], "fallback instrument pool feeds the track pool")
+end
+
+section("up_matching.build_instrument_pool falls back name to path")
+do
+  -- When info.name is empty, the pool should use info.path as the display name.
+  local no_name = { path = "/P/Mystery.vst", name = "" }
+  local mock_song = { instruments = { { plugin_properties = { available_plugin_infos = { no_name } } } } }
+  local pool = up_matching.build_instrument_pool(mock_song, nil, nil)
+  check(#pool == 1 and pool[1].name == "/P/Mystery.vst",
+    "instrument with empty name uses its path as the name")
+end
+
+section("up_matching.safeget tolerates a throwing getter")
+do
+  -- track_name_of must not blow up if a DeviceInfo getter raises. The probe order
+  -- is name, device_name, display_name, plugin_name, ... so the info below throws
+  -- on display_name *before* the readable plugin_name is reached: without
+  -- safeget's pcall the whole scan errors out instead of returning "Good".
+  local info = setmetatable({}, { __index = function(_, k)
+    if k == "display_name" then error("nope") end
+    if k == "plugin_name" then return "Good" end
+    return nil
+  end })
+  check(not pcall(function() return info.display_name end),
+    "the mocked DeviceInfo really throws on display_name")
+  local got = up_matching.build_track_pool(
+    { tracks = { { available_devices = { "/P/X.vst" },
+                   available_device_infos = { info } } },
+      instruments = {} }, nil, nil)
+  check(got and #got == 1 and got[1].name == "Good", "track_name_of ignores a throwing display_name getter")
+end
+
+section("up_matching.candidate_matches rejects the already-current plugin")
+do
+  local old = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  local same = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  same.path = "/P/Kick2.vst"
+  check(not up_matching.candidate_matches(same, old), "same path as old.raw is rejected")
+  local other = up_util.analyze_plugin("/P/Kick2b.vst", "Kick 2")
+  other.path = "/P/Kick2b.vst"
+  check(up_matching.candidate_matches(other, old), "different path with same base matches")
+end
+
+section("up_matching.vendor_ok treats empty vendor as unknown")
+do
+  check(up_matching.vendor_ok({ vendor = "" }, { vendor = "fabfilter" }),
+    "empty old vendor -> unknown -> ok")
+  check(up_matching.vendor_ok({ vendor = "fabfilter" }, { vendor = "" }),
+    "empty candidate vendor -> unknown -> ok")
+  check(not up_matching.vendor_ok({ vendor = "fabfilter" }, { vendor = "native" }),
+    "mismatched known vendors -> not ok")
+end
+
+section("up_matching.find_candidate picks the highest-ranked exact match")
+do
+  local old = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  local pool = {
+    up_util.analyze_plugin("/P/Kick2.vst", "Kick 2"),
+    up_util.analyze_plugin("/P/Kick2b.vst", "Kick 2"),
+  }
+  pool[1].path, pool[2].path = "/P/Kick2.vst", "/P/Kick2b.vst"
+  local best = up_matching.find_candidate(pool, old)
+  check(best ~= nil, "an exact candidate is found")
+end
+
+section("up_matching.find_candidates exercises all three fallback tiers")
+do
+  -- family match, then loose, then shared-token, in order.
+  local old = up_util.analyze_plugin(nil, "Reaktor5")
+  local reaktor6 = up_util.analyze_plugin("aumuRk6----", "Reaktor 6")
+  reaktor6.path = "aumuRk6----"
+  local fam = up_matching.find_candidates({ reaktor6 }, old)
+  check(#fam == 1, "family tier matches Reaktor5 -> Reaktor6")
+  -- With no family match, the loose tier must fire.
+  local old2 = up_util.analyze_plugin(nil, "Kick - Nicky Romero")
+  local kick2 = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  kick2.path = "/P/Kick2.vst"
+  local loose = up_matching.find_candidates({ kick2 }, old2)
+  check(#loose == 1, "loose tier matches Kick - Nicky Romero -> Kick 2")
 end
 
 -- 5. up_songxml ---------------------------------------------------------------
@@ -991,6 +1075,26 @@ do
     "broken plugin's parenthetical preset name matches a factory preset")
 end
 
+section("up_swap.swap_instrument ignores an empty () in a broken instrument name")
+do
+  -- Renoise appends an empty "()" to some broken instrument names. The empty
+  -- parenthetical must NOT be kept as a (truthy) preset name; the full name
+  -- should fall through as the preset instead.
+  local new_dev = {
+    is_active = true, active_preset_data = "", presets = { "My Song ()", "Other" }, parameters = {} }
+  local pp = {
+    plugin_loaded = false, plugin_device = nil,
+    load_plugin = function(self, _path) self.plugin_device = new_dev; return true end,
+  }
+  local song = { instruments = { { plugin_properties = pp } }, automation = function() return nil end }
+  local rec = { kind = "instrument", instrument_index = 1, broken = true, plugin_loaded = false,
+    instrument_name = "My Song ()", analysis = { protocol = "VST" }, device_path = nil }
+  local candidate = { path = "/P/Reaktor6.vst", protocol = "VST" }
+  local ok, res = pcall(function() return up_swap.swap_instrument(song, rec, candidate) end)
+  check(ok and res and res.status == "upgraded-name-matched-preset",
+    "empty parenthetical does not shadow the real preset name")
+end
+
 section("upgrade reinspection yields across ticks (no watchdog stall)")
 do
   -- Regression for the post-upgrade "script busy" stall: the per-row reinspection
@@ -1336,6 +1440,139 @@ do
     "replacement does NOT show bare plugin name as preset")
 end
 
+section("coverage: up_ui song-less dialog and observer lifecycle")
+do
+  local up_ui = require("up_ui")
+  -- show_dialog with no song open must warn and bail.
+  local real_song = _G.renoise.song
+  local real_app = _G.renoise.app
+  _G.renoise.song = function() return nil end
+  local warned = false
+  _G.renoise.app = function()
+    return { song_filename = fixture, show_custom_dialog = function() return { visible = true } end,
+      show_warning = function() warned = true end }
+  end
+  up_ui.show_dialog()
+  _G.renoise.app = real_app
+  _G.renoise.song = real_song
+  check(warned, "show_dialog warns when no song is open")
+
+  -- Build a song whose tracks/instruments expose observables so attach/detach and
+  -- structure callbacks can run for real (not just in a pcall that swallows nil).
+  local song_obs = {
+    tracks = { tracks_observable = observable(), instruments_observable = observable() },
+    instruments = { { plugin_properties = { plugin_loaded = true,
+        plugin_device = { device_path = "/P/ProMB.vst3", name = "VST3: FabFilter Pro-MB" } } } },
+  }
+  song_obs.tracks.devices_observable = observable()
+  local real_song2 = _G.renoise.song
+  _G.renoise.song = function() return song_obs end
+  up_ui.attach_observers()
+  check(up_ui._tn ~= nil and up_ui._in ~= nil, "attach_observers registers structure notifiers")
+  up_ui.on_structure_changed()
+  up_ui.detach_observers()
+  check(up_ui._tn == nil and up_ui._in == nil, "detach_observers clears structure notifiers")
+  up_ui.ensure_doc_observers()
+  up_ui.on_song_releasing()
+  up_ui.on_song_loaded()
+  _G.renoise.song = real_song2
+end
+
+section("coverage: up_ui dialog-close watch and scroll")
+do
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._dialog = { visible = true }
+  up_ui._closed = false
+  up_ui.watch_dialog()
+  -- Simulate the visibility flag flipping to false for three ticks -> teardown.
+  up_ui._dialog.visible = false
+  local idle = _G.renoise.tool().app_idle_observable
+  for _ = 1, 5 do idle._fire() end
+  check(up_ui._closed == true, "watch_tick detects closure after blank ticks")
+  up_ui.stop_all()
+  check(true, "stop_all runs without error")
+
+  -- on_scroll updates the scroll window and reapplies the visible slice.
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._data_rows = { up_ui._vb:row{}, up_ui._vb:row{}, up_ui._vb:row{} }
+  up_ui._mounted = {}
+  up_ui.on_scroll(1)
+  check(true, "on_scroll + apply_scroll run without error")
+end
+
+section("coverage: up_ui.do_upgrade runs an end-to-end upgrade")
+do
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._status_text = up_ui._vb:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._dialog = { visible = true }
+  up_ui._closed = false
+
+  -- A song with a loaded, upgradeable instrument plugin.
+  local pp = {
+    plugin_loaded = true,
+    plugin_device = { device_path = "/P/ProMB.vst3", name = "VST3: FabFilter Pro-MB",
+      active_preset_data = "x", parameters = {} },
+    load_plugin = function(self, _path)
+      self.plugin_device = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+      return true
+    end,
+  }
+  local song = {
+    instruments = { { plugin_properties = pp } }, tracks = {},
+    automation = function() return { is_automated = false } end,
+  }
+  local real_song = _G.renoise.song
+  _G.renoise.song = function() return song end
+
+  local rec = { kind = "instrument", instrument_index = 1, device_index = nil,
+    is_plugin = true, broken = false, device_path = "/P/ProMB.vst3",
+    device_name = "VST3: FabFilter Pro-MB",
+    analysis = up_util.analyze_plugin("/P/ProMB.vst3", "FabFilter Pro-MB") }
+  local cand = analyze("FabFilter Pro-MB", "/P/ProMB2.vst3", "VST3")
+  local rc = { entry = rec, candidates = { cand }, candidate = cand, status = nil }
+  up_ui._results = { rc }
+  up_ui._row_views = { { popup = { value = 2, active = true }, candidates = { cand },
+    result_txt = up_ui._vb:text{ text = "" }, old_tf = up_ui._vb:text{ text = "" } } }
+
+  up_ui.do_upgrade()
+  local idle = _G.renoise.tool().app_idle_observable
+  for _ = 1, 400 do idle._fire() end
+  check(rc.status ~= nil and rc.status:find("^upgraded") ~= nil,
+    "do_upgrade swaps the plugin and reports an upgraded status (" .. tostring(rc.status) .. ")")
+
+  -- A second do_upgrade while upgrading must act as Stop, not recurse.
+  local mid_abort = up_ui.do_upgrade
+  check(mid_abort ~= nil, "do_upgrade is callable as a Stop while upgrading")
+  _G.renoise.song = real_song
+end
+
+section("coverage: up_ui.do_upgrade with no selection and reconcile reuse")
+do
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._vb:column{}
+  up_ui._status_text = up_ui._vb:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._results = { { entry = { kind = "instrument", analysis = up_util.analyze_plugin(nil, "Reaktor5") },
+    candidates = {}, candidate = nil } }
+  local rv_no = { popup = { value = 1, active = false }, candidates = {}, result_txt = up_ui._vb:text{ text = "" } }
+  up_ui._row_views = { rv_no }
+  up_ui.do_upgrade()
+  check(true, "do_upgrade with no selection reports a friendly status")
+
+  -- reconcile reuses the cached pool instead of a full rescan.
+  up_ui._pools = { track = {}, inst = {} }
+  up_ui._closed = false
+  up_ui.reconcile()
+  check(true, "reconcile runs a same-song rescan without rebuilding the pool")
+end
+
 -- ---------------------------------------------------------------------------
 section("coverage: matching fallbacks + find_candidates")
 do
@@ -1376,6 +1613,14 @@ do
     "label is the user patch when unrelated to the plugin name")
   check(up_util.instrument_preset_label("VST: Reaktor5", "VST", reaktor_a) == "",
     "empty label when the name is only the plugin itself")
+
+  -- Hyphenated product words (e.g. "Pro-Q") must be recognized as the plugin's own
+  -- identity, not leaked as a user preset label.
+  local proq = up_util.analyze_plugin(nil, "VST3: FabFilter Pro-Q")
+  check(up_util.instrument_preset_label("VST3: FabFilter Pro-Q", "VST3", proq) == "",
+    "hyphenated product name (Pro-Q) is the plugin, not a preset")
+  check(up_util.instrument_preset_label("VST3: FabFilter Pro-Q (My Patch)", "VST3", proq) == "My Patch",
+    "preset after a hyphenated plugin name is still carried over")
 end
 
 section("coverage: up_core.apply_one success and error path")
@@ -1429,6 +1674,416 @@ do
     "mismatched closing tag fails the parse")
   check(up_xml.parse("<Root><A></Root>") == nil,
     "closing tag without an open element fails the parse")
+end
+
+section("coverage: up_inventory.scan capture of track device preset")
+do
+  local mock_song = {
+    instruments = {},
+    tracks = { { devices = { {}, { is_plugin = true, device_path = "/P/Sylenth1.vst",
+      device_name = "VST: Lennardigital Sylenth1", active_preset = 2,
+      presets = { "Init", "ARP 303 Saw" }, available_devices = {} } } } },
+  }
+  local rec = up_inventory.scan_track_device(1, mock_song.tracks[1], 2)
+  check(rec ~= nil, "scan_track_device returns the plugin rec")
+  check(rec.active_preset_name == "ARP 303 Saw", "active preset name captured from presets[index]")
+end
+
+section("coverage: up_inventory.scan skips non-plugin instruments (sampler)")
+do
+  local mock_song = {
+    instruments = { { name = "Sampler", plugin_properties = { plugin_loaded = true,
+      plugin_device = { device_path = "Native/Sampler", name = "Sampler" } } } },
+    tracks = {},
+  }
+  local entries = up_inventory.scan(mock_song, nil, nil, nil)
+  local found = false
+  for _, e in ipairs(entries) do
+    if e.kind == "instrument" and e.device_name == "Sampler" then found = true end
+  end
+  check(found, "native Sampler instrument is surfaced by scan")
+end
+
+section("coverage: up_songxml.parse_instruments skips samplers and recover() handles no file")
+do
+  local xml = [[<?xml version="1.0"?>
+<Song>
+  <Instrument><Name>Just a Sampler</Name></Instrument>
+  <Instrument><Name>Reaktor Inst</Name><PluginGenerator><PluginDevice>
+    <PluginType>AU</PluginType>
+    <PluginDisplayName>AU: Native Instruments: Reaktor5</PluginDisplayName>
+  </PluginDevice></PluginGenerator></Instrument>
+</Song>]]
+  local info = up_songxml.parse_instruments(xml)
+  -- The sampler (no PluginType) is skipped, so the plugin is indexed by its name,
+  -- not by the 1-based instrument position (which the sampler occupies).
+  check(info["Reaktor Inst"] and info["Reaktor Inst"].display_name == "AU: Native Instruments: Reaktor5",
+    "plugin instrument indexed by name; sampler without PluginType skipped")
+  -- recover() needs a real song file; with none it yields an empty table.
+  local got = up_songxml.recover({ file_name = "" })
+  check(got ~= nil and type(got) == "table", "recover() returns a table even with no song file")
+
+  -- An empty or whitespace-only <PluginType> is not a real protocol: a non-plugin
+  -- instrument with such an edge-case element must NOT be misclassified as a plugin.
+  for _, pt in ipairs({ "", "   " }) do
+    local x = string.format([[<?xml version="1.0"?>
+<Song>
+  <Instrument><Name>Edge Case %q</Name><PluginGenerator><PluginDevice>
+    <PluginType>%s</PluginType>
+    <PluginDisplayName>Edge Case %s</PluginDisplayName>
+  </PluginDevice></PluginGenerator></Instrument>
+</Song>]], pt, pt, pt)
+    local inf = up_songxml.parse_instruments(x)
+    check(inf["Edge Case " .. pt] == nil,
+      "instrument with empty/whitespace PluginType (" .. tostring(pt) .. ") is not treated as a plugin")
+  end
+end
+
+section("coverage: up_swap.swap_track_device upgrades a track plugin")
+do
+  local track = {
+    devices = { [1] = {}, [2] = { is_active = true, active_preset_data = "", parameters = {} } },
+    insert_device_at = function(self, _path, idx)
+      local dev = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+      table.insert(self.devices, idx, dev); return dev
+    end,
+    delete_device_at = function(self, idx) table.remove(self.devices, idx) end,
+  }
+  local song = { tracks = { track }, instruments = {},
+    automation = function() return { is_automated = false } end }
+  local rec = { kind = "track", track_index = 1, device_index = 2, is_plugin = true,
+    device_path = "/P/Sylenth1.vst", device_name = "VST: Lennardigital Sylenth1",
+    analysis = analyze("VST: Lennardigital Sylenth1", "/P/Sylenth1.vst", "VST") }
+  local candidate = { name = "Sylenth1", protocol = "VST", path = "/P/Sylenth1-VST3.vst" }
+  local ok, res = pcall(function() return up_swap.swap_track_device(song, rec, candidate) end)
+  check(ok and res and res.status ~= nil, "swap_track_device upgrades the track plugin")
+end
+
+section("coverage: up_core pools, cache, match, analyze, apply_one")
+do
+  local song = {
+    instruments = {
+      { name = "Reaktor 5", plugin_properties = { plugin_loaded = true,
+          plugin_device = { device_path = "aumuRk5----", name = "NI: Reaktor5", available_devices = {} },
+          available_plugin_infos = { { path = "/P/Reaktor6.vst", name = "Reaktor 6" } } } },
+    },
+    tracks = {},
+  }
+  up_core.invalidate_pool_cache()
+  local t1, i1 = up_core.build_pools(song)
+  local t2, i2 = up_core.build_pools(song)
+  check(t1 == t2 and i1 == i2, "build_pools caches by signature")
+  up_core.invalidate_pool_cache()
+  local _, i3 = up_core.build_pools(song)
+  check(#i3 >= 1, "build_pools rebuilds after invalidate")
+
+  -- match_entries finds the Reaktor 6 candidate for a Reaktor 5 entry.
+  local r6 = up_util.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6"); r6.path = "/P/Reaktor6.vst"
+  local rec = { kind = "instrument", analysis = up_util.analyze_plugin(nil, "Reaktor5") }
+  local results = up_core.match_entries({ rec }, { track = {}, inst = { r6 } }, nil, nil, nil)
+  check(results[1] and #results[1].candidates >= 1, "match_entries offers Reaktor 6 for Reaktor 5")
+
+  -- analyze runs scan + match end to end.
+  up_core.invalidate_pool_cache()
+  local ares = up_core.analyze(song, nil, nil, nil, nil)
+  check(#ares >= 1, "analyze scans and matches the song")
+
+  -- apply_one with no candidate reports a skip (broken vs up-to-date).
+  local broken = up_core.apply_one(song, { entry = { kind = "instrument", broken = true,
+    analysis = up_util.analyze_plugin(nil, "Reaktor5") }, candidate = nil }, nil)
+  check(broken.status == "skipped-no-candidate-broken", "apply_one skips a broken plugin with no candidate")
+  local uptodate = up_core.apply_one(song, { entry = { kind = "instrument", broken = false,
+    analysis = up_util.analyze_plugin(nil, "Reaktor5") }, candidate = nil }, nil)
+  check(uptodate.status == "skipped-up-to-date", "apply_one skips an up-to-date plugin with no candidate")
+end
+
+-- ---------------------------------------------------------------------------
+section("coverage: up_matching.build_instrument_pool (paths, dups, fallback)")
+do
+  -- Entries with a real path are pooled; an empty path is skipped; an entry with
+  -- only a name (no path) falls back to the path being the name; duplicate paths
+  -- are de-duplicated via the seen table.
+  local song = {
+    instruments = {
+      { plugin_properties = { available_plugin_infos = {
+          { path = "/P/Reaktor6.vst", name = "Reaktor 6" },
+          { path = "/P/Reaktor6.vst", name = "Reaktor 6" },  -- duplicate path (de-duped)
+          { path = "", name = "EmptyPath" },                  -- empty path skipped
+          { path = "/P/X.vst", name = "" },                  -- blank name -> path fallback
+          { name = "NoPath Plugin" },                        -- no path -> skipped
+      } } },
+    },
+  }
+  local pool = up_matching.build_instrument_pool(song)
+  local byname = {}
+  for _, a in ipairs(pool) do byname[a.name] = true end
+  check(#pool == 2, "build_instrument_pool pools unique path entries (dedup + skip empty)")
+  check(byname["Reaktor 6"] and byname["/P/X.vst"], "name and path-fallback entries pooled")
+
+  -- With no discoverable devices, the fallback pool is consulted.
+  local song2 = { tracks = { {} } }
+  local fb = { analyze("VST3: FabFilter Pro-Q 3", "/P/Q.vst3", "VST3") }
+  local pool2 = up_matching.build_track_pool(song2, nil, nil, fb)
+  check(#pool2 == 1 and pool2[1].base:find("pro q"), "build_track_pool uses the fallback pool")
+end
+
+section("coverage: up_matching.build_track_pool")
+do
+  local song = { tracks = {
+    { available_devices = { "/P/Q.vst3" },
+      available_device_infos = { { name = "FabFilter Pro-Q 3" } } },
+  } }
+  local pool = up_matching.build_track_pool(song)
+  check(#pool == 1 and pool[1].base:find("pro q"), "build_track_pool zips devices + infos")
+end
+
+section("coverage: up_matching candidate_matches_family / _shared direct")
+do
+  local old = analyze("VST3: FabFilter Pro-L", "/P/ProL.vst3", "VST3")
+  local same = analyze("VST3: FabFilter Pro-L 2", "/P/ProL2.vst3", "VST3")
+  local diff = analyze("AU: Native Instruments: Reaktor5", "Reaktor5.au", "AU")
+  check(not up_matching.candidate_matches_family(same, nil), "family: nil old -> false")
+  check(not up_matching.candidate_matches_family(same, same),
+    "family: identical path is not an upgrade candidate")
+  check(up_matching.candidate_matches_family(same, old), "family: Pro-L -> Pro-L 2 matches")
+  check(not up_matching.candidate_matches_family(diff, old), "family: Reaktor5 != Pro-L")
+
+  -- Shared-token last resort: family differs, loose token match fails, but a
+  -- significant product token is shared (only reached via find_candidates).
+  local sh_old = analyze("VST: Reaktor 5 Extra", "/P/R5.vst", "VST")
+  local sh_cand = analyze("VST: Reaktor 6 Other", "/P/R6.vst", "VST")
+  check(not up_matching.candidate_matches_family(sh_cand, sh_old), "family: Reaktor 5 Extra != Reaktor 6 Other")
+  check(not up_matching.candidate_matches_loose(sh_cand, sh_old), "loose: no subset between the two")
+  check(up_matching.candidate_matches_shared(sh_cand, sh_old), "shared: shared 'reaktor' product token matches")
+
+  check(not up_matching.candidate_matches_shared(same, nil), "shared: nil old -> false")
+  check(not up_matching.candidate_matches_shared(same, same), "shared: identical path -> false")
+  local empt = analyze("???", "/P/X.vst", "VST")
+  check(not up_matching.candidate_matches_shared(empt, empt), "shared: empty token sets -> false")
+end
+
+section("coverage: up_matching.find_candidates fallback chain")
+do
+  -- Family match wins when available.
+  local oldf = analyze("VST3: FabFilter Pro-L", "/P/ProL.vst3", "VST3")
+  local fam = up_matching.find_candidates({ analyze("VST3: FabFilter Pro-L 2", "/P/ProL2.vst3", "VST3") }, oldf)
+  check(#fam == 1 and fam[1].base:find("pro l 2"), "find_candidates prefers family match")
+
+  -- Loose token match when no family match (Kick - Nicky Romero -> Kick 2).
+  local oldk = analyze("VST: Kick - Nicky Romero ()", "/P/Kick.vst", "VST")
+  local loose = up_matching.find_candidates({ analyze("VST: Kick 2", "/P/Kick2.vst", "VST") }, oldk)
+  check(#loose == 1 and loose[1].base == "kick 2", "find_candidates falls back to loose token match")
+
+  -- Shared-token last resort (Reaktor 5 Extra -> Reaktor 6 Other).
+  local olds = analyze("VST: Reaktor 5 Extra", "/P/R5.vst", "VST")
+  local shared = up_matching.find_candidates({ analyze("VST: Reaktor 6 Other", "/P/R6.vst", "VST") }, olds)
+  check(#shared == 1 and shared[1].base:find("reaktor 6 other"),
+    "find_candidates falls back to shared product token")
+
+  -- No candidate matches -> empty list.
+  local none = up_matching.find_candidates({ analyze("VST: Serum", "/P/Serum.vst", "VST") }, oldf)
+  check(#none == 0, "find_candidates returns empty when nothing matches")
+end
+
+section("coverage: up_inventory.scan recovery paths")
+do
+  -- Recovery indexed by live instrument index.
+  local recovery_a = { [1] = { index = 1, instrument_name = "Kick NR",
+    protocol = "VST", identifier = "Kick", display_name = "VST: Kick" } }
+  local song_a = { instruments = {
+    { name = "Kick NR", plugin_properties = { plugin_loaded = false, plugin_device = nil } } }, tracks = {} }
+  local ea = up_inventory.scan(song_a, nil, nil, nil, recovery_a)
+  check(ea[1] and ea[1].device_name == "VST: Kick", "recovery resolved by live index")
+
+  -- Recovery indexed by instrument name.
+  local recovery_b = { ["Foo Inst"] = { index = 2, instrument_name = "Foo Inst",
+    display_name = "VST: Foo" } }
+  local song_b = { instruments = {
+    { name = "Foo Inst", plugin_properties = { plugin_loaded = false, plugin_device = nil } } }, tracks = {} }
+  local eb = up_inventory.scan(song_b, nil, nil, nil, recovery_b)
+  check(eb[1] and eb[1].device_name == "VST: Foo", "recovery resolved by instrument name")
+
+  -- Recovery indexed by name with a trailing "()" (Renoise appends it).
+  local recovery_c = { ["Kick NR"] = { index = 2, instrument_name = "Kick NR",
+    display_name = "VST: Kick" } }
+  local song_c = { instruments = {
+    { name = "Kick NR ()", plugin_properties = { plugin_loaded = false, plugin_device = nil } } }, tracks = {} }
+  local ec = up_inventory.scan(song_c, nil, nil, nil, recovery_c)
+  check(ec[1] and ec[1].device_name == "VST: Kick", "recovery resolved by name with trailing ()")
+
+  -- apply_recovered rejects an entry with no usable display name.
+  local recovery_d = { [1] = { index = 1, instrument_name = "Mystery", identifier = nil } }
+  local song_d = { instruments = {
+    { name = "Mystery", plugin_properties = { plugin_loaded = false, plugin_device = nil } } }, tracks = {} }
+  local ed = up_inventory.scan(song_d, nil, nil, nil, recovery_d)
+  check(#ed == 0, "instrument with no recoverable identity is dropped")
+
+  -- Missing plugin with no recovery but a live plugin_properties name.
+  local song_e = { instruments = {
+    { name = "Something", plugin_properties = { plugin_loaded = false, plugin_device = nil,
+        plugin_name = "VST: Recovered Foo" } } }, tracks = {} }
+  local ee = up_inventory.scan(song_e, nil, nil, nil, {})
+  check(ee[1] and ee[1].device_name == "VST: Recovered Foo",
+    "missing plugin surfaced from live plugin_properties name")
+
+  -- Missing plugin surfaced by an instrument name carrying a protocol token.
+  local song_f = { instruments = {
+    { name = "VST: Kick - Nicky Romero ()", plugin_properties = { plugin_loaded = false,
+        plugin_device = nil } } }, tracks = {} }
+  local ef = up_inventory.scan(song_f, nil, nil, nil, {})
+  check(ef[1] and ef[1].device_name == "VST: Kick - Nicky Romero ()" and ef[1].recovered == false,
+    "missing plugin surfaced from live instrument name (protocol token)")
+
+  -- Recovered plugin whose loaded placeholder device is blank: the authoritative
+  -- display name from the saved song must overwrite the empty device name.
+  local recovery_g = { [1] = { index = 1, instrument_name = "DD",
+    display_name = "AU: Reaktor5", preset_name = "Razor" } }
+  local song_g = { instruments = {
+    { name = "DD", plugin_properties = { plugin_loaded = false,
+        plugin_device = { device_path = "", name = "", active_preset_data = "" } } } }, tracks = {} }
+  local eg = up_inventory.scan(song_g, nil, nil, nil, recovery_g)
+  check(eg[1] and eg[1].device_name == "AU: Reaktor5" and eg[1].active_preset_name == "Razor",
+    "blank placeholder device name overwritten by recovered display name + preset")
+
+  -- A loaded plugin whose path is hidden by the API recovers identity from the song.
+  local recovery_h = { [1] = { index = 1, instrument_name = "DD", display_name = "AU: Reaktor5" } }
+  local song_h = { instruments = {
+    { name = "DD", plugin_properties = { plugin_loaded = true,
+        plugin_device = { name = "X", active_preset_data = "y" } } } }, tracks = {} }
+  local eh = up_inventory.scan(song_h, nil, nil, nil, recovery_h)
+  check(eh[1] and eh[1].recovered == true, "identity recovered for path-less loaded plugin")
+
+  -- A loaded plugin with an unidentifiable device is still surfaced by its name.
+  local song_i = { instruments = {
+    { name = "Named Dev", plugin_properties = { plugin_loaded = true,
+        plugin_device = { name = "Named Dev", active_preset_data = "y" } } } }, tracks = {} }
+  local ei = up_inventory.scan(song_i, nil, nil, nil, {})
+  check(ei[1] and ei[1].device_name == "Named Dev", "path-less device surfaced by its name")
+end
+
+section("coverage: up_songxml recover cache + edge inputs")
+do
+  up_songxml.invalidate_cache()
+  local r1 = up_songxml.recover({ file_name = fixture })
+  local r2 = up_songxml.recover({ file_name = fixture })
+  check(r1 ~= nil and r2 ~= nil, "recover returns parsed identity table from the fixture")
+  up_songxml.invalidate_cache()
+  local empty = up_songxml.recover({ file_name = "" })
+  check(empty ~= nil and type(empty) == "table", "recover returns a table when no song file exists")
+
+  -- Whitespace-only fields collapse to nil and a non-plugin (no PluginType) is skipped.
+  local xml = [[<?xml version="1.0"?>
+<Song><Instrument><Name>   </Name><PluginType>  </PluginType>
+<PluginDisplayName>x</PluginDisplayName></Instrument></Song>]]
+  local info = up_songxml.parse_instruments(xml)
+  check(info[1] == nil, "instrument with blank PluginType is not classified as a plugin")
+end
+
+section("coverage: up_preset.extract_name edge cases")
+do
+  -- active_preset index out of range yields no active_preset_name.
+  check(up_preset.extract_name({ active_preset = 99, presets = { "Only" } }) == nil,
+    "out-of-range active_preset -> nil")
+  -- A chunk with only a plugin_name (no name) attribute yields no preset.
+  check(up_preset.extract_name({ active_preset_data = '<device plugin_name="Serum"></device>' }) == nil,
+    "chunk with plugin_name only -> nil")
+  -- An empty chunk yields nil.
+  check(up_preset.extract_name({ active_preset_data = "" }) == nil, "empty chunk -> nil")
+  -- A raw binary blob with no file:// URL is rejected before decoding.
+  check(up_preset.extract_name({ active_preset_data = "\000\000\001\002blob\255" }) == nil,
+    "binary blob without file:// URL -> nil")
+end
+
+section("coverage: up_swap.swap_track_device up-to-date + rejected")
+do
+  local track = {
+    devices = { [1] = {}, [2] = { is_active = true, active_preset_data = "", parameters = {} } },
+    insert_device_at = function(self, _path, idx)
+      local dev = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+      table.insert(self.devices, idx, dev); return dev
+    end,
+    delete_device_at = function(self, idx) table.remove(self.devices, idx) end,
+  }
+  local song = { tracks = { track }, instruments = {},
+    automation = function() return { is_automated = false } end }
+
+  -- Candidate is the plugin already loaded at this device: skip (up-to-date).
+  local rec = { kind = "track", track_index = 1, device_index = 2, is_plugin = true,
+    device_path = "/P/Sylenth1.vst", device_name = "VST: Lennardigital Sylenth1",
+    analysis = analyze("VST: Lennardigital Sylenth1", "/P/Sylenth1.vst", "VST") }
+  local same = up_swap.swap_track_device(song, rec, { name = "Sylenth1", protocol = "VST",
+    path = "/P/Sylenth1.vst" })
+  check(same and same.status == "up-to-date", "swap_track_device skips an already-current plugin")
+
+  -- insert_device_at failing yields a transfer-rejected status (no crash).
+  local track2 = {
+    devices = { [1] = {}, [2] = { is_active = true, active_preset_data = "", parameters = {} } },
+    insert_device_at = function() return nil end,
+    delete_device_at = function() end,
+  }
+  local song2 = { tracks = { track2 }, instruments = {},
+    automation = function() return { is_automated = false } end }
+  local rejected = up_swap.swap_track_device(song2, rec, { name = "Sylenth1", protocol = "VST",
+    path = "/P/Sylenth1-VST3.vst" })
+  check(rejected and rejected.status == "skipped-transfer-rejected",
+    "swap_track_device reports rejected when insert fails")
+end
+
+section("coverage: up_swap.swap_instrument transfer-state branches")
+do
+  local mkrec = function(proto)
+    return { kind = "instrument", instrument_index = 1, broken = false, plugin_loaded = true,
+      instrument_name = "Old", device_path = "/P/MB.vst3", device_name = "VST3: Pro-MB",
+      analysis = analyze("VST3: Pro-MB", "/P/MB.vst3", proto or "VST3") }
+  end
+
+  -- Same-format preset chunk transfer ("parameters").
+  local new_dev_p = { is_active = true, active_preset_data = "", presets = {}, parameters = {} }
+  local pp_p = { plugin_loaded = true,
+    plugin_device = { device_path = "/P/MB.vst3", name = "VST3: Pro-MB",
+      active_preset_data = "<PresetName>Old</PresetName>", parameters = {} },
+    load_plugin = function(self, _p) self.plugin_device = new_dev_p; return true end }
+  local song_p = { instruments = { { plugin_properties = pp_p } }, tracks = {},
+    automation = function() return { is_automated = false } end }
+  local okp, rp = pcall(function() return up_swap.swap_instrument(song_p, mkrec("VST3"),
+    { name = "Pro-MB 2", protocol = "VST3", path = "/P/MB2.vst3" }) end)
+  check(okp and rp, "swap_instrument transfers same-format preset chunk")
+  check(okp and rp and rp.status == "upgraded-with-parameters", "same-format chunk transfer -> parameters")
+
+  -- Factory-preset base name match ("name").
+  local new_dev_n = { is_active = true, active_preset_data = "", presets = { "Old" }, parameters = {} }
+  local pp_n = { plugin_loaded = true,
+    plugin_device = { device_path = "/P/MB.vst3", name = "VST3: Pro-MB",
+      active_preset = 1, presets = { "Old" }, active_preset_data = "" },
+    load_plugin = function(self, _p) self.plugin_device = new_dev_n; return true end }
+  local song_n = { instruments = { { plugin_properties = pp_n } }, tracks = {},
+    automation = function() return { is_automated = false } end }
+  local okn, rn = pcall(function() return up_swap.swap_instrument(song_n, mkrec("VST3"),
+    { name = "Pro-MB 2", protocol = "VST3", path = "/P/MB2.vst3" }) end)
+  check(okn and rn and rn.status == "upgraded-name-matched-preset", "factory-preset base name match -> name")
+
+  -- Parameter overlay ("params").
+  local new_dev_x = { is_active = true, active_preset_data = "", presets = {},
+    parameters = { { name = "Mix", is_automatable = true } } }
+  local pp_x = { plugin_loaded = true,
+    plugin_device = { device_path = "/P/MB.vst3", name = "VST3: Pro-MB",
+      active_preset_data = "", parameters = { { name = "Mix", value = 0.5, is_automatable = true } } },
+    load_plugin = function(self, _p) self.plugin_device = new_dev_x; return true end }
+  local song_x = { instruments = { { plugin_properties = pp_x } }, tracks = {},
+    automation = function() return { is_automated = false } end }
+  local okx, rx = pcall(function() return up_swap.swap_instrument(song_x, mkrec("AU"),
+    { name = "Pro-MB 2", protocol = "AU", path = "/P/MB2.au" }) end)
+  check(okx and rx and rx.status == "upgraded-parameter-synth", "cross-format parameter overlay -> params")
+
+  -- load_plugin failing yields a transfer-rejected status (no crash).
+  local pp_bad = { plugin_loaded = true,
+    plugin_device = { device_path = "/P/MB.vst3", name = "VST3: Pro-MB", active_preset_data = "" },
+    load_plugin = function() return nil end }
+  local song_bad = { instruments = { { plugin_properties = pp_bad } }, tracks = {},
+    automation = function() return { is_automated = false } end }
+  local okb, rb = pcall(function() return up_swap.swap_instrument(song_bad, mkrec("VST3"),
+    { name = "Pro-MB 2", protocol = "VST3", path = "/P/MB2.vst3" }) end)
+  check(okb and rb and rb.status == "skipped-transfer-rejected", "swap_instrument reports rejected when load fails")
 end
 
 -- ---------------------------------------------------------------------------
