@@ -103,18 +103,54 @@ jobs:
           fi
           rm -f "$tmp"
 
+      - name: Update vendored SLAXML (slaxml.lua) from upstream master
+        env:
+          UPSTREAM_REPO: Phrogz/SLAXML
+          UPSTREAM_REF: master
+        run: |
+          # Track the latest commit on upstream's default branch so a PR is opened
+          # automatically whenever SLAXML changes -- no hand-edited SHA in this
+          # file. The slaxml rockspec on LuaRocks is broken (it references a git
+          # tag that no longer exists), so we vendor slaxml.lua directly; the PR's
+          # own CI (tests + luacheck) validates the new parser before we merge.
+          url="https://raw.githubusercontent.com/${UPSTREAM_REPO}/${UPSTREAM_REF}/slaxml.lua"
+          upstream_sha="$(git ls-remote "https://github.com/${UPSTREAM_REPO}" "${UPSTREAM_REF}" | awk '{print $1}')"
+          tmp="$(mktemp)"
+          curl -fsSL "$url" -o "$tmp"
+          if ! cmp -s "$tmp" lib/slaxml.lua; then
+            cp "$tmp" lib/slaxml.lua
+            echo "CHANGED=true" >> "$GITHUB_ENV"
+            echo "SLAXML_SHA=${upstream_sha}" >> "$GITHUB_ENV"
+            echo "Updated vendored SLAXML to upstream ${UPSTREAM_REF} @ ${upstream_sha}."
+          else
+            echo "SLAXML already up to date with upstream ${UPSTREAM_REF} @ ${upstream_sha}."
+          fi
+          rm -f "$tmp"
+
+      - name: Compose PR body
+        if: ${{ env.CHANGED == 'true' }}
+        run: |
+          {
+            echo "Automated dependency updates:"
+            echo "- LuaRocks dev dependencies in the rockspec (Dependabot has no LuaRocks ecosystem), and/or"
+            echo "- the vendored pure-Lua \`LibDeflate\` library refreshed from upstream, and/or"
+            echo "- the vendored pure-Lua \`SLAXML\` (slaxml.lua) parser refreshed from upstream master."
+            echo
+            echo "The test suite exercises \`up_zip\` (which uses LibDeflate) and \`up_xml\`"
+            echo "(which uses SLAXML), so this PR's checks will catch a regressing update"
+            echo "to either vendored library."
+            if [ -n "${SLAXML_SHA:-}" ]; then
+              echo
+              echo "SLAXML was updated to upstream master commit \`${SLAXML_SHA}\`."
+            fi
+          } > /tmp/pr-body.md
+
       - name: Create Pull Request
         if: ${{ env.CHANGED == 'true' }}
         uses: peter-evans/create-pull-request@v8
         with:
-          commit-message: "Bump dependencies (LuaRocks dev deps and/or vendored LibDeflate)"
+          commit-message: "Bump dependencies (LuaRocks dev deps and/or vendored libraries)"
           title: "Bump dependencies"
-          body: |
-            Automated dependency updates:
-            - LuaRocks dev dependencies in the rockspec (Dependabot has no LuaRocks ecosystem), and/or
-            - the vendored pure-Lua `LibDeflate` library refreshed from upstream.
-
-            The test suite exercises `up_zip` (which uses LibDeflate), so this PR's
-            checks will catch a regressing LibDeflate update.
+          body-path: /tmp/pr-body.md
           branch: bump-dependencies
           delete-branch: true

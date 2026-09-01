@@ -1,4 +1,7 @@
 *.xrnx
 luacov.stats.out
 coverage.lcov
+# NOTE: lib/slaxml.lua is vendored into the repo (MIT, see the file header) so
+# the build no longer depends on LuaRocks' slaxml package, whose rockspec points
+# at a git tag that no longer exists upstream.
 

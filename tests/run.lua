@@ -358,6 +358,48 @@ do
     "attribute value containing the other quote is parsed correctly")
 end
 
+section("up_xml.parse (pure-Lua XML tree)")
+do
+  -- Validates the tree parser used by up_songxml: nested elements, attributes,
+  -- <InstrumentGroup> handling, descendant text, and CDATA.
+  local xml = [==[<?xml version="1.0"?>
+<Song>
+  <InstrumentGroup>
+    <Instrument name="a"><PluginType>VST</PluginType><Name>Kick A</Name></Instrument>
+    <Instrument name="b"><PluginType>AU</PluginType><Name>Reaktor B</Name></Instrument>
+  </InstrumentGroup>
+  <Instrument foo="bar"><Name>VST C</Name><PluginType>VST3</PluginType>
+    <ParameterChunk preset="x">  <![CDATA[hello]]></ParameterChunk>
+  </Instrument>
+</Song>]==]
+  local doc = up_xml.parse(xml)
+  check(doc and doc.tag == "Song", "root element is Song")
+  local insts = up_xml.find_all(doc, "Instrument")
+  check(#insts == 3, "all <Instrument> found at any depth (group + plain + attributed)")
+  check(insts[3].attrs.foo == "bar", "attribute parsed from tag")
+  check(insts[1].attrs.name == "a", "attribute parsed (first grouped instrument)")
+  check(up_xml.descendant_text(insts[1], "Name") == "Kick A", "descendant text extracted")
+  check(up_xml.descendant_cdata(insts[3], "ParameterChunk") == "hello",
+    "CDATA extracted despite surrounding whitespace")
+end
+
+section("up_xml.parse handles high codepoints and inner-quote attribute values")
+do
+  -- &#8217; is a curly apostrophe (U+2019), a codepoint > 255 that string.char() would
+  -- reject; it must decode to UTF-8 without raising and without aborting the parse.
+  local xml = [==[<Song><Name>Don&#8217;t</Name>
+    <Instrument name='a "quoted" value'><PluginType>VST</PluginType></Instrument>
+  </Song>]==]
+  local doc = up_xml.parse(xml)
+  check(doc ~= nil, "parses despite a high codepoint entity")
+  local name = up_xml.descendant_text(doc, "Name")
+  check(name and name:find("&#8217;") == nil and name:find("Don") and name:find("t"),
+    "high codepoint entity decoded to UTF-8 (not left raw)")
+  local inst = up_xml.find_all(doc, "Instrument")[1]
+  check(inst.attrs.name == 'a "quoted" value',
+    "attribute value containing the other quote is parsed correctly")
+end
+
 -- 4. up_matching --------------------------------------------------------------
 section("up_matching.candidate_matches (exact)")
 do
@@ -588,6 +630,35 @@ do
   check(info["VST: Sonic Academy: Kick - Nicky Romero"]
     and info["VST: Sonic Academy: Kick - Nicky Romero"].display_name == "VST: Sonic Academy: Kick - Nicky Romero",
     "recoverable by plugin display name")
+end
+
+section("up_songxml.parse_instruments treats blank name fields as absent")
+do
+  -- Empty / self-closing name elements must not defeat the display_name <-> short
+  -- fallback, and must never become lookup keys (out[""] would make any blank-name
+  -- lookup resolve to an unrelated instrument).
+  local xml = [[<?xml version="1.0"?>
+<Song>
+  <Instrument><Name></Name><PluginGenerator><PluginDevice>
+    <PluginType>AU</PluginType>
+    <PluginIdentifier />
+    <PluginDisplayName/>
+    <PluginShortDisplayName>Reaktor5</PluginShortDisplayName>
+  </PluginDevice></PluginGenerator></Instrument>
+  <Instrument><Name>Kick NR</Name><PluginGenerator><PluginDevice>
+    <PluginType>VST</PluginType>
+    <PluginDisplayName>VST: Sonic Academy: Kick - Nicky Romero</PluginDisplayName>
+    <PluginShortDisplayName>   </PluginShortDisplayName>
+  </PluginDevice></PluginGenerator></Instrument>
+</Song>]]
+  local info = up_songxml.parse_instruments(xml)
+  check(info[1] and info[1].display_name == "Reaktor5",
+    "empty <PluginDisplayName/> falls back to the short display name")
+  check(info[1] and info[1].instrument_name == nil and info[1].identifier == nil,
+    "blank <Name> / <PluginIdentifier> are nil, not empty strings")
+  check(info[2] and info[2].short_display_name == "VST: Sonic Academy: Kick - Nicky Romero",
+    "whitespace-only short display name falls back to the display name")
+  check(info[""] == nil, "no entry is indexed under an empty-string key")
 end
 
 section("up_songxml.parse_instruments recovers Reaktor ensemble (preset) from chunk")
@@ -1273,6 +1344,16 @@ do
   local found = false
   for _, e in ipairs(entries) do if e.kind == "track" then found = true; break end end
   check(found, "scan surfaces a track plugin device as a track entry")
+end
+
+section("up_xml.parse rejects malformed (mismatched) closing tags")
+do
+  -- Malformed XML with a mismatched or unopened closing tag must be rejected
+  -- (fail the parse) rather than silently producing an incorrect tree.
+  check(up_xml.parse("<Root><A></B></Root>") == nil,
+    "mismatched closing tag fails the parse")
+  check(up_xml.parse("<Root><A></Root>") == nil,
+    "closing tag without an open element fails the parse")
 end
 
 -- ---------------------------------------------------------------------------
