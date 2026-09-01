@@ -72,12 +72,16 @@ previous preset/state.
 ## Missing / broken plugins
 
 - **Broken *instrument* plugins:** when a plugin fails to load,
-  `plugin_device` is `nil`, so the live API exposes no path or name. The
-  tool reads the song's own `.xrns` archive (a zip containing `Song.xml`,
-  which records every plugin's identity, including missing ones) to recover
-  the original display name, then matches and upgrades it. The replacement
-  loads at default state unless the instrument name resolves to a preset in
-  the installed plugin's own bank.
+   `plugin_device` is `nil`, so the live API exposes no path or name. The
+   tool reads the song's own `.xrns` archive (a zip containing `Song.xml`,
+   which records every plugin's identity, including missing ones) to recover
+   the original display name, then matches and upgrades it. `Song.xml` is
+   parsed by the dependency-free pure-Lua tree parser in `lib/up_xml.lua`
+   (`up_songxml.parse_instruments` walks it with `find_all(root,"Instrument")`,
+   so `<InstrumentGroup>` nesting and attribute-bearing tags are handled
+   structurally, never by fragile string matching). The replacement loads at
+   default state unless the instrument name resolves to a preset in the
+   installed plugin's own bank.
 - **Broken *track* devices:** detected when `active_preset_data` raises an
   error; these are listed as broken and matched normally from their
   `device_path`/`name`.
@@ -107,6 +111,11 @@ dependency-free Lua test suite (`tests/run.lua`) and a CI workflow
 LuaJIT), compile-checks every source file, and runs the suite:
 
     lua5.1 tests/run.lua
+
+- The suite installs a **strict metatable on `_G`**: reading an *undeclared
+  global* (e.g. a bare `utf8`) errors out. Always `require` libraries rather
+  than referencing them as bare globals, and run `luacheck lib/*.lua tests/run.lua`
+  (LibDeflate is vendored and excluded) to keep the lint clean.
 
 It covers plugin-name analysis, candidate matching (exact and
 version/name-flexible — including `Kick - Nicky Romero` → `Kick 2`,
