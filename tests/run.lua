@@ -320,6 +320,8 @@ do
   -- A filename with interior dots must keep every dot but the final extension.
   check(up_preset._extract_chunk_name("file:///Shared/My.Ensemble.rkplr") == "My.Ensemble",
     "interior dots are preserved (only the last extension is stripped)")
+  check(up_preset._extract_chunk_name("file:///Shared/NoExtension") == nil,
+    "a file:// URL without an extension yields no name")
 end
 
 section("up_xml.parse (pure-Lua XML tree)")

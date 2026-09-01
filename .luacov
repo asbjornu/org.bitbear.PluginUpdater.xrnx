@@ -5,7 +5,9 @@ return {
   -- (up_util), since either form may appear depending on how LuaCov names the
   -- chunk, so the library modules actually show up in the report.
   include = { "lib/.*", "up_.*", ".*main.*" },
-  -- Exclude the vendored third-party library so its (large, not-ours) line
-  -- coverage doesn't skew the percentages reported to Codecov.
-  exclude = { "tests/.*", ".*LibDeflate.*" },
+  -- Exclude vendored third-party libraries so their (large, not-ours) line
+  -- coverage doesn't skew the percentages reported to Codecov. SLAXML is
+  -- committed into lib/ for the same reason as LibDeflate (its LuaRocks rockspec
+  -- is broken), so it is excluded too.
+  exclude = { "tests/.*", ".*LibDeflate.*", ".*slaxml.*" },
 }
