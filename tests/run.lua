@@ -347,6 +347,17 @@ do
   check(up_xml.descendant_text(insts[1], "Name") == "Kick A", "descendant text extracted")
   check(up_xml.descendant_cdata(insts[3], "ParameterChunk") == "hello",
     "CDATA extracted despite surrounding whitespace")
+
+  -- Direct-child accessors (child / child_text / child_cdata) and their nil
+  -- branches.
+  local doc = up_xml.parse("<Root><A>hi</A><B><![CDATA[x]]></B></Root>")
+  check(up_xml.child(doc, "A") ~= nil, "child finds a direct child element")
+  check(up_xml.child(doc, "Z") == nil, "child returns nil when absent")
+  check(up_xml.child_text(doc, "A") == "hi", "child_text returns trimmed text")
+  check(up_xml.child_text(doc, "Z") == nil, "child_text returns nil when absent")
+  check(up_xml.child_cdata(doc, "B") == "x", "child_cdata returns CDATA")
+  check(up_xml.child_cdata(doc, "Z") == nil, "child_cdata returns nil when absent")
+  check(up_xml.child(nil, "A") == nil, "child is nil-safe on a nil element")
 end
 
 section("up_xml require fails clearly when slaxml is missing (vendored, not LuaRocks)")
