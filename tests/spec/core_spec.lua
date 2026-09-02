@@ -50,8 +50,8 @@ do
   check(#i3 >= 1, "build_pools rebuilds after invalidate")
 
   -- match_entries finds the Reaktor 6 candidate for a Reaktor 5 entry.
-  local r6 = up_util.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6"); r6.path = "/P/Reaktor6.vst"
-  local rec = { kind = "instrument", analysis = up_util.analyze_plugin(nil, "Reaktor5") }
+  local r6 = up_plugin_analysis.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6"); r6.path = "/P/Reaktor6.vst"
+  local rec = { kind = "instrument", analysis = up_plugin_analysis.analyze_plugin(nil, "Reaktor5") }
   local results = up_core.match_entries({ rec }, { track = {}, inst = { r6 } }, nil, nil, nil)
   check(results[1] and #results[1].candidates >= 1, "match_entries offers Reaktor 6 for Reaktor 5")
 
@@ -62,9 +62,9 @@ do
 
   -- apply_one with no candidate reports a skip (broken vs up-to-date).
   local broken = up_core.apply_one(song, { entry = { kind = "instrument", broken = true,
-    analysis = up_util.analyze_plugin(nil, "Reaktor5") }, candidate = nil }, nil)
+    analysis = up_plugin_analysis.analyze_plugin(nil, "Reaktor5") }, candidate = nil }, nil)
   check(broken.status == "skipped-no-candidate-broken", "apply_one skips a broken plugin with no candidate")
   local uptodate = up_core.apply_one(song, { entry = { kind = "instrument", broken = false,
-    analysis = up_util.analyze_plugin(nil, "Reaktor5") }, candidate = nil }, nil)
+    analysis = up_plugin_analysis.analyze_plugin(nil, "Reaktor5") }, candidate = nil }, nil)
   check(uptodate.status == "skipped-up-to-date", "apply_one skips an up-to-date plugin with no candidate")
 end

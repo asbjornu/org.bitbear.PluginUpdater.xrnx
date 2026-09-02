@@ -1,4 +1,4 @@
-local up_util = require("up_util")
+local up_plugin_analysis = require("up_plugin_analysis")
 
 local up_matching = {}
 
@@ -82,9 +82,9 @@ function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool
         dp = info
       end
       local dn = (type(info) == "table") and info.device_name or nil
-      if dp and not up_util.is_native_path(dp) and not seen[dp] then
+      if dp and not up_plugin_analysis.is_native_path(dp) and not seen[dp] then
         seen[dp] = true
-        local a = up_util.analyze_plugin(dp, dn)
+        local a = up_plugin_analysis.analyze_plugin(dp, dn)
         a.path = dp
         a.name = dn
         table.insert(pool, a)
@@ -99,9 +99,9 @@ function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool
       local p = tostring(a.path or "")
         :gsub("[Gg]enerators", "Effects")
         :gsub("[Gg]enerator", "Effect")
-      if p ~= "" and not up_util.is_native_path(p) and not seen[p] then
+      if p ~= "" and not up_plugin_analysis.is_native_path(p) and not seen[p] then
         seen[p] = true
-        local a2 = up_util.analyze_plugin(p, a.product or a.name)
+        local a2 = up_plugin_analysis.analyze_plugin(p, a.product or a.name)
         a2.path = p
         table.insert(pool, a2)
       end
@@ -152,10 +152,10 @@ function up_matching.build_instrument_pool(song, yield_fn, on_progress)
       -- handles Renoise loads by, so gate on a non-empty string rather than on
       -- path shape.
       if type(info.path) == "string" and info.path ~= "" then
-        if type(nm) == "string" and nm ~= "" and not up_util.is_native_path(nm) then
+        if type(nm) == "string" and nm ~= "" and not up_plugin_analysis.is_native_path(nm) then
           if not seen[info.path] then
             seen[info.path] = true
-            local a = up_util.analyze_plugin(info.path, nm)
+            local a = up_plugin_analysis.analyze_plugin(info.path, nm)
             a.path = info.path
             a.name = nm
             table.insert(pool, a)
@@ -203,12 +203,12 @@ function up_matching.candidate_matches_loose(c, old)
   if c.path == old.raw then
     return false
   end
-  local tc = up_util.token_set(c.base)
-  local to = up_util.token_set(old.base)
+  local tc = up_plugin_analysis.token_set(c.base)
+  local to = up_plugin_analysis.token_set(old.base)
   if not next(tc) or not next(to) then
     return false
   end
-  return up_util.token_subset(tc, to) or up_util.token_subset(to, tc)
+  return up_plugin_analysis.token_subset(tc, to) or up_plugin_analysis.token_subset(to, tc)
 end
 
 -- Last-resort match for plugins we could only identify by their live instrument
@@ -224,13 +224,13 @@ function up_matching.candidate_matches_shared(c, old)
   if c.path == old.raw then
     return false
   end
-  local tc = up_util.token_set(c.base)
-  local to = up_util.token_set(old.base)
+  local tc = up_plugin_analysis.token_set(c.base)
+  local to = up_plugin_analysis.token_set(old.base)
   if not next(tc) or not next(to) then
     return false
   end
   for k in pairs(tc) do
-    if #k >= 4 and to[k] and up_util.is_product_token(k) then
+    if #k >= 4 and to[k] and up_plugin_analysis.is_product_token(k) then
       return true
     end
   end
@@ -245,9 +245,9 @@ function up_matching.find_candidate(pool, old_analysis)
   local best_rank = nil
   for _, c in ipairs(pool) do
     if up_matching.candidate_matches(c, old_analysis) then
-      if best == nil or up_util.rank(c) > best_rank then
+      if best == nil or up_plugin_analysis.rank(c) > best_rank then
         best = c
-        best_rank = up_util.rank(c)
+        best_rank = up_plugin_analysis.rank(c)
       end
     end
   end
@@ -274,7 +274,7 @@ function up_matching.candidate_matches_family(c, old)
   if c.path == old.raw then
     return false
   end
-  if up_util.family_base(c.base) ~= up_util.family_base(old.base) then
+  if up_plugin_analysis.family_base(c.base) ~= up_plugin_analysis.family_base(old.base) then
     return false
   end
   return up_matching.vendor_ok(c, old)
@@ -325,7 +325,7 @@ function up_matching.find_candidates(pool, old_or_rec)
       local sa = (a.protocol == old_analysis.protocol) and 1 or 0
       local sb = (b.protocol == old_analysis.protocol) and 1 or 0
       if sa ~= sb then return sa > sb end
-      return up_util.rank(a) > up_util.rank(b)
+      return up_plugin_analysis.rank(a) > up_plugin_analysis.rank(b)
     end)
   end
   return list

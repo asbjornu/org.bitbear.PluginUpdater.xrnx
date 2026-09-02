@@ -1,4 +1,4 @@
-local up_util = require("up_util")
+local up_plugin_analysis = require("up_plugin_analysis")
 local up_song_xml = require("up_song_xml")
 
 local up_inventory = {}
@@ -26,10 +26,10 @@ local function inspect_track_device(track, track_index, dev_index)
   rec.device_path = ok_path and path or nil
   local ok_plugin, isp = pcall(function() return dev.is_plugin end)
   rec.is_plugin = (ok_plugin and isp) and true or false
-  if rec.device_path and up_util.is_plugin_path(rec.device_path) then
+  if rec.device_path and up_plugin_analysis.is_plugin_path(rec.device_path) then
     rec.is_plugin = true
   end
-  if not rec.device_path or up_util.is_native_path(rec.device_path) then
+  if not rec.device_path or up_plugin_analysis.is_native_path(rec.device_path) then
     rec.is_plugin = false
   end
   local ok_pd, pd = pcall(function() return dev.active_preset_data end)
@@ -109,7 +109,7 @@ local function apply_recovered(rec, info)
   -- would otherwise survive and leave device_name empty -- exactly the case this
   -- recovery path exists to fix. Only keep an existing name that is actually set.
   rec.device_name = (rec.device_name ~= nil and rec.device_name ~= "") and rec.device_name or dn
-  rec.analysis = up_util.analyze_plugin(nil, dn)
+  rec.analysis = up_plugin_analysis.analyze_plugin(nil, dn)
   rec.recovered = true
   if info.preset_name then
     rec.active_preset_name = info.preset_name
@@ -178,7 +178,7 @@ local function inspect_instrument(inst, ii, recovery)
       end
     end
     if rec.device_path then
-      rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name or inst.name)
+      rec.analysis = up_plugin_analysis.analyze_plugin(rec.device_path, rec.device_name or inst.name)
       return rec
     end
     -- Plugin present but its path is hidden by the API: try to recover the
@@ -189,7 +189,7 @@ local function inspect_instrument(inst, ii, recovery)
       return rec
     end
     -- Device present but unidentifiable: still surface it (defaults to Keep current).
-    rec.analysis = up_util.analyze_plugin(nil, rec.device_name or inst.name)
+    rec.analysis = up_plugin_analysis.analyze_plugin(nil, rec.device_name or inst.name)
     return rec
   end
 
@@ -209,7 +209,7 @@ local function inspect_instrument(inst, ii, recovery)
   local live = live_plugin_name(pp)
   if live then
     rec.device_name = live
-    rec.analysis = up_util.analyze_plugin(nil, live)
+    rec.analysis = up_plugin_analysis.analyze_plugin(nil, live)
     rec.recovered = true
     rec.notes = { "recovered identity from live plugin_properties: " .. tostring(live) }
     return rec
@@ -219,9 +219,9 @@ local function inspect_instrument(inst, ii, recovery)
   -- surfaced using that name as its identity. Loose / shared-token matching can
   -- then still find an upgrade (Kick -> Kick 2). Nameless samplers and ext. MIDI
   -- devices are left out to avoid blank rows.
-  if inst.name and inst.name ~= "" and up_util.detect_protocol(inst.name) then
+  if inst.name and inst.name ~= "" and up_plugin_analysis.detect_protocol(inst.name) then
     rec.device_name = inst.name
-    rec.analysis = up_util.analyze_plugin(nil, inst.name)
+    rec.analysis = up_plugin_analysis.analyze_plugin(nil, inst.name)
     rec.recovered = false
     rec.notes = { "identity from live instrument name only (no plugin_properties/song.xml)" }
     return rec
@@ -248,7 +248,7 @@ function up_inventory.scan(song, yield_fn, on_progress, on_found, recovery)
       for di = 2, #devs do
         local rec = inspect_track_device(track, ti, di)
         if rec.is_plugin then
-          rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name)
+          rec.analysis = up_plugin_analysis.analyze_plugin(rec.device_path, rec.device_name)
           table.insert(entries, rec)
           if on_found then
             on_found(rec)
@@ -279,7 +279,7 @@ end
 function up_inventory.scan_track_device(track_index, track, di)
   local rec = inspect_track_device(track, track_index, di)
   if rec.is_plugin then
-    rec.analysis = up_util.analyze_plugin(rec.device_path, rec.device_name)
+    rec.analysis = up_plugin_analysis.analyze_plugin(rec.device_path, rec.device_name)
     return rec
   end
   return nil

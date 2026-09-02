@@ -1,6 +1,6 @@
-local up_util = {}
+local up_plugin_analysis = {}
 
-up_util.PROTOCOL_RANK = { CLAP = 4, VST3 = 3, VST2 = 2, VST = 2, AU = 1, LV2 = 0, DSSI = 0 }
+up_plugin_analysis.PROTOCOL_RANK = { CLAP = 4, VST3 = 3, VST2 = 2, VST = 2, AU = 1, LV2 = 0, DSSI = 0 }
 
 local DETECT_ORDER = { "CLAP", "VST3", "VST2", "VST", "AU", "LV2", "DSSI" }
 
@@ -24,11 +24,11 @@ local NONPRODUCT = {
   way = true, ho = true, plugin = true,
 }
 
-function up_util.is_product_token(tok)
+function up_plugin_analysis.is_product_token(tok)
   return not NONPRODUCT[tok]
 end
 
-function up_util.detect_protocol(s)
+function up_plugin_analysis.detect_protocol(s)
   if type(s) ~= "string" then return nil end
   local lower = s:lower()
   for _, tok in ipairs(DETECT_ORDER) do
@@ -39,7 +39,7 @@ function up_util.detect_protocol(s)
   return nil
 end
 
-function up_util.is_native_path(path)
+function up_plugin_analysis.is_native_path(path)
   if type(path) ~= "string" then return false end
   -- Renoise's built-in (non-plugin) devices live under the "Native/" namespace,
   -- e.g. "Audio/Effects/Native/Gainer". Match that namespace only -- not the
@@ -50,22 +50,22 @@ function up_util.is_native_path(path)
   return path:lower():find("native[/\\]") ~= nil
 end
 
-function up_util.is_plugin_path(path)
-  if type(path) ~= "string" or up_util.is_native_path(path) then
+function up_plugin_analysis.is_plugin_path(path)
+  if type(path) ~= "string" or up_plugin_analysis.is_native_path(path) then
     return false
   end
-  return up_util.detect_protocol(path) ~= nil
+  return up_plugin_analysis.detect_protocol(path) ~= nil
 end
 
-function up_util.protocol_rank(p)
-  return up_util.PROTOCOL_RANK[p or ""] or 0
+function up_plugin_analysis.protocol_rank(p)
+  return up_plugin_analysis.PROTOCOL_RANK[p or ""] or 0
 end
 
-function up_util.strip_version(product)
+function up_plugin_analysis.strip_version(product)
   return (product:gsub("%s+[vV]?%d+%.?%d*%s*$", ""))
 end
 
-function up_util.extract_version(product)
+function up_plugin_analysis.extract_version(product)
   local v = product:match("%s+[vV]?(%d+%.?%d*)%s*$")
   if v then
     return tonumber(v)
@@ -78,7 +78,7 @@ end
 -- both become "reaktor" (and "native instruments: reaktor 6" -> the same). Used
 -- for best-effort matching of missing plugins, where we can't transfer state
 -- anyway, so a newer major version is an acceptable replacement.
-function up_util.family_base(s)
+function up_plugin_analysis.family_base(s)
   if type(s) ~= "string" then return "" end
   local t = s:lower()
   t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
@@ -93,7 +93,7 @@ end
 -- which distinguishes it from "Pro-MB"); subset comparison makes stray
 -- single-char tokens harmless because a match requires ALL of one side's tokens
 -- to appear in the other.
-function up_util.token_set(s)
+function up_plugin_analysis.token_set(s)
   if type(s) ~= "string" then return {} end
   local t = s:lower()
   t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
@@ -110,7 +110,7 @@ function up_util.token_set(s)
 end
 
 -- True when every significant token of `a` also appears in `b`.
-function up_util.token_subset(a, b)
+function up_plugin_analysis.token_subset(a, b)
   for k in pairs(a) do
     if not b[k] then return false end
   end
@@ -173,8 +173,8 @@ local function clean_display_name(name, protocol)
   return s
 end
 
-function up_util.analyze_plugin(path, name)
-  local protocol = up_util.detect_protocol(path) or up_util.detect_protocol(name)
+function up_plugin_analysis.analyze_plugin(path, name)
+  local protocol = up_plugin_analysis.detect_protocol(path) or up_plugin_analysis.detect_protocol(name)
 
   -- Prefer the human-readable display name (from DeviceInfo/PluginInfo or
   -- device.name). This is the only reliable key for matching across protocols,
@@ -198,7 +198,7 @@ function up_util.analyze_plugin(path, name)
   if base == "" then
     base = (type(path) == "string" and path or "") or ""
   end
-  local version = up_util.extract_version(product)
+  local version = up_plugin_analysis.extract_version(product)
   return {
     raw = path,
     protocol = protocol,
@@ -210,16 +210,16 @@ function up_util.analyze_plugin(path, name)
   }
 end
 
-function up_util.rank(info)
+function up_plugin_analysis.rank(info)
   local v = info.version or 0
-  return up_util.protocol_rank(info.protocol) * 1000 + v
+  return up_plugin_analysis.protocol_rank(info.protocol) * 1000 + v
 end
 
 -- Given a preset/instrument name and the owning plugin's analysis, return the
 -- part of the preset that is NOT just a restatement of the plugin name. e.g.
 -- plugin product "lennardigital sylenth1" + preset "VST: Sylenth1 (ARP 303 Saw)"
 -- -> "ARP 303 Saw". Returns "" when the preset adds nothing new.
-function up_util.strip_redundant_prefix(preset, protocol, analysis)
+function up_plugin_analysis.strip_redundant_prefix(preset, protocol, analysis)
   local basetoks = {}
   local base = (analysis and analysis.product) or ""
   for w in base:gmatch("%S+") do
@@ -271,7 +271,7 @@ end
 --   "VST: Reaktor5"                   -> ""            (just the plugin itself)
 -- Unlike strip_redundant_prefix this PRESERVES parenthetical content, because that
 -- is exactly where the user's preset frequently lives.
-function up_util.instrument_preset_label(name, protocol, analysis)
+function up_plugin_analysis.instrument_preset_label(name, protocol, analysis)
   local s = tostring(name or ""):match("^%s*(.-)%s*$")
   if s == "" then return "" end
   -- Drop a leading "PROTO: " (protocol) tag.
@@ -325,7 +325,7 @@ end
 -- name with original case, e.g. "VST: Lennardigital Sylenth1" or
 -- "VST3: FabFilter Pro-Q 3". Strips a leading category/protocol tag (since we
 -- re-emit the protocol), drops architecture markers, and unifies separators.
-function up_util.format_plugin(name, protocol)
+function up_plugin_analysis.format_plugin(name, protocol)
   local s = tostring(name or "")
   local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
   if tag then
@@ -352,4 +352,4 @@ function up_util.format_plugin(name, protocol)
   return s
 end
 
-return up_util
+return up_plugin_analysis

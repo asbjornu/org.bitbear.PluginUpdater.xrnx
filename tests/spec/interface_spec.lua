@@ -18,7 +18,7 @@ do
   -- exercised indirectly below via fill_row/capture_selections, which call them.
 
   local rec = { kind = "instrument", instrument_name = "Kick NR",
-    analysis = up_util.analyze_plugin(nil, "VST: Sonic Academy: Kick - Nicky Romero"),
+    analysis = up_plugin_analysis.analyze_plugin(nil, "VST: Sonic Academy: Kick - Nicky Romero"),
     device_name = "VST: Sonic Academy: Kick - Nicky Romero" }
 
   local cands = {
@@ -82,7 +82,7 @@ do
 
   -- Explicit preset name: shown in both columns, carried over to the upgrade.
   local rec = { kind = "instrument", instrument_name = "My Reaktor",
-    analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5"),
+    analysis = up_plugin_analysis.analyze_plugin(nil, "AU: Native Instruments: Reaktor5"),
     device_name = "Native Instruments: Reaktor5",
     active_preset_name = "Make It Bright" }
   local cands = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
@@ -115,7 +115,7 @@ do
   up_ui.clear_list()
 
   local rec = { kind = "instrument", instrument_name = "Dark Dreams 1",
-    analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5"),
+    analysis = up_plugin_analysis.analyze_plugin(nil, "AU: Native Instruments: Reaktor5"),
     device_name = "Native Instruments: Reaktor5",
     active_preset_name = "Razor", broken = true, recovered = true }
   local cands = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
@@ -151,7 +151,7 @@ do
   -- must NOT be leaked into the replacement column as if it were Reaktor 6's
   -- preset (the earlier "Reaktor 6 (Reaktor5)" bug).
   local rec = { kind = "instrument", instrument_name = "VST: Reaktor5",
-    analysis = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
+    analysis = up_plugin_analysis.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
     device_name = "Native Instruments: Reaktor5" }
   local cands = { analyze("Reaktor6", "/P/Reaktor6.app", "AU") }
   local rc = { entry = rec, candidates = cands, candidate = cands[1] }
@@ -168,7 +168,7 @@ do
 
   -- And an embedded ensemble (file:// URL in the blob) is recovered and shown.
   local rec2 = { kind = "instrument", instrument_name = "Reaktor 5",
-    analysis = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
+    analysis = up_plugin_analysis.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
     device_name = "Native Instruments: Reaktor5",
     active_preset_data = "\000\000file://localhost/Users/Shared/Razor/Razor.rkplr\000\000" }
   local rc2 = { entry = rec2, candidates = cands, candidate = cands[1] }
@@ -185,7 +185,7 @@ do
   -- instrument name, e.g. "VST: Reaktor5 (Make It Bright)". Surface that as the
   -- preset in both columns, but never the bare plugin name ("Reaktor5").
   local rec3 = { kind = "instrument", instrument_name = "VST: Reaktor5 (Make It Bright)",
-    analysis = up_util.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
+    analysis = up_plugin_analysis.analyze_plugin(nil, "VST: Native Instruments: Reaktor5"),
     device_name = "Native Instruments: Reaktor5" }
   local rc3 = { entry = rec3, candidates = cands, candidate = cands[1] }
   up_ui._results = { rc3 }
@@ -294,7 +294,7 @@ do
   local rec = { kind = "instrument", instrument_index = 1, device_index = nil,
     is_plugin = true, broken = false, device_path = "/P/ProMB.vst3",
     device_name = "VST3: FabFilter Pro-MB",
-    analysis = up_util.analyze_plugin("/P/ProMB.vst3", "FabFilter Pro-MB") }
+    analysis = up_plugin_analysis.analyze_plugin("/P/ProMB.vst3", "FabFilter Pro-MB") }
   local cand = analyze("FabFilter Pro-MB", "/P/ProMB2.vst3", "VST3")
   local rc = { entry = rec, candidates = { cand }, candidate = cand, status = nil }
   up_ui._results = { rc }
@@ -320,7 +320,7 @@ do
   up_ui._list_box = up_ui._vb:column{}
   up_ui._status_text = up_ui._vb:text{ text = "" }
   up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
-  up_ui._results = { { entry = { kind = "instrument", analysis = up_util.analyze_plugin(nil, "Reaktor5") },
+  up_ui._results = { { entry = { kind = "instrument", analysis = up_plugin_analysis.analyze_plugin(nil, "Reaktor5") },
     candidates = {}, candidate = nil } }
   local rv_no = { popup = { value = 1, active = false }, candidates = {}, result_txt = up_ui._vb:text{ text = "" } }
   up_ui._row_views = { rv_no }

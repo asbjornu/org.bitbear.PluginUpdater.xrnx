@@ -1,6 +1,6 @@
 local up_core = require("up_core")
 local up_scheduler = require("up_scheduler")
-local up_util = require("up_util")
+local up_plugin_analysis = require("up_plugin_analysis")
 local up_inventory = require("up_inventory")
 local up_matching = require("up_matching")
 local up_preset = require("up_preset")
@@ -78,7 +78,7 @@ local function rec_preset_name(rec)
   -- bare ensemble name and keep the ensemble ("Razor") as a secondary detail: the
   -- preset name must be preserved and carried over, not replaced by the synth name.
   if (rec.broken or rec.recovered) and rec.instrument_name then
-    local instr_label = up_util.instrument_preset_label(rec.instrument_name,
+    local instr_label = up_plugin_analysis.instrument_preset_label(rec.instrument_name,
       rec.analysis and rec.analysis.protocol, rec.analysis)
     if instr_label and instr_label ~= "" then
       if explicit and explicit ~= "" and explicit ~= instr_label then
@@ -101,11 +101,11 @@ local function rec_preset_name(rec)
       return paren:gsub("%s+", " "):match("^%s*(.-)%s*$")
     end
     local proto = rec.analysis and rec.analysis.protocol
-    local extra = up_util.strip_redundant_prefix(rec.instrument_name, proto, rec.analysis)
+    local extra = up_plugin_analysis.strip_redundant_prefix(rec.instrument_name, proto, rec.analysis)
     if extra and extra ~= "" then
-      local et = up_util.token_set(extra)
-      local bt = up_util.token_set(rec.analysis and rec.analysis.base or "")
-      if not (et and next(et) and up_util.token_subset(et, bt)) then
+      local et = up_plugin_analysis.token_set(extra)
+      local bt = up_plugin_analysis.token_set(rec.analysis and rec.analysis.base or "")
+      if not (et and next(et) and up_plugin_analysis.token_subset(et, bt)) then
         return extra
       end
     end
@@ -115,17 +115,17 @@ end
 
 local function old_label(rec)
   local proto = rec.analysis and rec.analysis.protocol
-  local plugin = up_util.format_plugin(rec.device_name, proto)
+  local plugin = up_plugin_analysis.format_plugin(rec.device_name, proto)
   if not plugin or plugin == "" then
     if rec.analysis then
-      plugin = up_util.format_plugin(rec.analysis.raw, proto)
+      plugin = up_plugin_analysis.format_plugin(rec.analysis.raw, proto)
     else
       return "?"
     end
   end
   local preset = rec_preset_name(rec)
   if preset and preset ~= "" then
-    local extra = up_util.strip_redundant_prefix(preset, proto, rec.analysis)
+    local extra = up_plugin_analysis.strip_redundant_prefix(preset, proto, rec.analysis)
     if extra and extra ~= "" then
       return string.format("%s (%s)", plugin, extra)
     end
@@ -604,10 +604,10 @@ end
 -- Returns the 1-based popup index, or 1 ("Keep current") when none qualify.
 local function auto_select_index(cands, entry)
   local ep = entry.analysis and entry.analysis.protocol
-  local er = up_util.protocol_rank(ep)
+  local er = up_plugin_analysis.protocol_rank(ep)
   local best_i, best_score
   for i, c in ipairs(cands) do
-    local cr = up_util.protocol_rank(c.protocol)
+    local cr = up_plugin_analysis.protocol_rank(c.protocol)
     if cr >= er then
       local score = cr * 1000 + (c.version or 0)
       if not best_score or score > best_score then
@@ -632,9 +632,9 @@ function up_ui.fill_row(result, preset_value)
   -- the upgrade keeps their patch (e.g. "Reaktor 6 (Make It Bright)").
   local carry = rec_preset_name(rec)
   for _, c in ipairs(cands) do
-    local label = up_util.format_plugin(c.name, c.protocol)
+    local label = up_plugin_analysis.format_plugin(c.name, c.protocol)
     if carry and carry ~= "" then
-      local extra = up_util.strip_redundant_prefix(carry, c.protocol, c)
+      local extra = up_plugin_analysis.strip_redundant_prefix(carry, c.protocol, c)
       if extra and extra ~= "" then
         label = string.format("%s (%s)", label, extra)
       end

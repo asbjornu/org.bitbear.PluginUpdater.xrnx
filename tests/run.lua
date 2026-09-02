@@ -61,7 +61,7 @@ do
   local declared = {
     LibDeflate = true, LibStub = true, arg = true, luacov = true, renoise = true, unpack = true,
     -- Product modules, exposed as globals so the spec files can use them.
-    up_util = true, up_matching = true, up_preset = true, up_song_xml = true,
+    up_plugin_analysis = true, up_matching = true, up_preset = true, up_song_xml = true,
     up_xml = true, up_inventory = true, up_core = true, up_zip = true,
     up_swap = true, up_scheduler = true, up_ui = true,
     -- Shared test helpers, exposed as globals.
@@ -177,7 +177,7 @@ _G.observable = observable
 
 -- Load every product module once and expose it as a global so the spec files can
 -- reference it by its module name.
-_G.up_util      = require("up_util")
+_G.up_plugin_analysis      = require("up_plugin_analysis")
 _G.up_matching  = require("up_matching")
 _G.up_preset    = require("up_preset")
 _G.up_song_xml   = require("up_song_xml")
@@ -203,13 +203,13 @@ function _G.section(name) print("\n== " .. name .. " ==") end
 
 -- Helpers ---------------------------------------------------------------------
 function _G.analyze(name, path, proto)
-  local a = _G.up_util.analyze_plugin(path, name)
+  local a = _G.up_plugin_analysis.analyze_plugin(path, name)
   a.path = path or ""; a.name = name or ""; a.protocol = proto or a.protocol
   return a
 end
 function _G.candidates_for(old_name, pool, broken)
   return _G.up_matching.find_candidates(pool, {
-    analysis = _G.up_util.analyze_plugin(nil, old_name),
+    analysis = _G.up_plugin_analysis.analyze_plugin(nil, old_name),
     broken = broken or false,
     recovered = broken or false,
     kind = "track",
@@ -220,7 +220,7 @@ end
 _G.section("compile-check all sources")
 local sources = { "main.lua", "lib/up_core.lua", "lib/up_inventory.lua",
   "lib/up_matching.lua", "lib/up_preset.lua", "lib/up_scheduler.lua",
-  "lib/up_song_xml.lua", "lib/up_swap.lua", "lib/up_ui.lua", "lib/up_util.lua",
+  "lib/up_song_xml.lua", "lib/up_swap.lua", "lib/up_ui.lua", "lib/up_plugin_analysis.lua",
   "lib/up_zip.lua" }
 for _, s in ipairs(sources) do
   local f, err = loadfile(root .. "/" .. s)

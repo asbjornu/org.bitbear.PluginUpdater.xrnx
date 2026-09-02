@@ -5,7 +5,7 @@
 -- 4. up_matching --------------------------------------------------------------
 section("up_matching.candidate_matches (exact)")
 do
-  local old = up_util.analyze_plugin(nil, "VST3: FabFilter Pro-MB")
+  local old = up_plugin_analysis.analyze_plugin(nil, "VST3: FabFilter Pro-MB")
   local same = analyze("VST3: FabFilter Pro-MB", "/P/ProMB.vst3", "VST3")
   local diffver = analyze("VST3: FabFilter Pro-Q 3", "/P/ProQ3.vst3", "VST3")
   check(up_matching.candidate_matches(same, old), "exact match same product+version")
@@ -14,11 +14,11 @@ end
 
 section("up_matching.candidate_matches_loose")
 do
-  local old = up_util.analyze_plugin(nil, "VST: Sonic Academy: Kick - Nicky Romero")
+  local old = up_plugin_analysis.analyze_plugin(nil, "VST: Sonic Academy: Kick - Nicky Romero")
   local kick2 = analyze("VST: Sonic Academy: Kick 2", "/P/Kick2.vst", "VST")
   check(up_matching.candidate_matches_loose(kick2, old), "Kick - Nicky Romero -> Kick 2")
 
-  local oldr = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5")
+  local oldr = up_plugin_analysis.analyze_plugin(nil, "AU: Native Instruments: Reaktor5")
   local r6 = analyze("Reaktor6", "/P/Reaktor6.app", "AU")
   check(up_matching.candidate_matches_loose(r6, oldr), "Reaktor5 -> Reaktor6 (vendor asymmetry)")
 
@@ -104,7 +104,7 @@ do
   check(names["Sonic Academy: Kick 2"], "VST3 instrument with opaque path is kept in pool")
   check(names["FabFilter Pro-L 2"], "VST instrument with real path is kept in pool")
   local cands = up_matching.find_candidates(pool,
-    { analysis = up_util.analyze_plugin(nil, "Sonic Academy: Kick") })
+    { analysis = up_plugin_analysis.analyze_plugin(nil, "Sonic Academy: Kick") })
   check(#cands == 1 and cands[1].name:find("Kick 2") ~= nil,
     "old Kick -> Kick 2 candidate found in instrument pool")
 end
@@ -124,7 +124,7 @@ do
   check(names["Native Instruments: Reaktor 6"], "AU 'Native Instruments: Reaktor 6' kept in pool")
   check(names["Reaktor 6"], "VST3 'Reaktor 6' kept in pool")
    local cands = up_matching.find_candidates(pool,
-     { analysis = up_util.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
+     { analysis = up_plugin_analysis.analyze_plugin(nil, "AU: Native Instruments: Reaktor5") })
    check(#cands >= 1 and cands[1].name:find("Reaktor 6") ~= nil,
      "Reaktor 5 -> Reaktor 6 offered as upgrade")
 end
@@ -183,7 +183,7 @@ section("up_matching.build_track_pool falls back to instrument pool on empty")
 do
   -- When no track devices exist, build_track_pool accepts the instrument pool as
   -- a fallback so track plugins named via instruments still surface.
-  local inst_pool = { up_util.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6") }
+  local inst_pool = { up_plugin_analysis.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6") }
   inst_pool[1].path = "/P/Reaktor6.vst"
   local mock_song = { tracks = { { available_devices = {} } }, instruments = {} }
   local pool = up_matching.build_track_pool(mock_song, nil, nil, inst_pool)
@@ -224,11 +224,11 @@ end
 
 section("up_matching.candidate_matches rejects the already-current plugin")
 do
-  local old = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
-  local same = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  local old = up_plugin_analysis.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  local same = up_plugin_analysis.analyze_plugin("/P/Kick2.vst", "Kick 2")
   same.path = "/P/Kick2.vst"
   check(not up_matching.candidate_matches(same, old), "same path as old.raw is rejected")
-  local other = up_util.analyze_plugin("/P/Kick2b.vst", "Kick 2")
+  local other = up_plugin_analysis.analyze_plugin("/P/Kick2b.vst", "Kick 2")
   other.path = "/P/Kick2b.vst"
   check(up_matching.candidate_matches(other, old), "different path with same base matches")
 end
@@ -245,10 +245,10 @@ end
 
 section("up_matching.find_candidate picks the highest-ranked exact match")
 do
-  local old = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  local old = up_plugin_analysis.analyze_plugin("/P/Kick2.vst", "Kick 2")
   local pool = {
-    up_util.analyze_plugin("/P/Kick2.vst", "Kick 2"),
-    up_util.analyze_plugin("/P/Kick2b.vst", "Kick 2"),
+    up_plugin_analysis.analyze_plugin("/P/Kick2.vst", "Kick 2"),
+    up_plugin_analysis.analyze_plugin("/P/Kick2b.vst", "Kick 2"),
   }
   pool[1].path, pool[2].path = "/P/Kick2.vst", "/P/Kick2b.vst"
   local best = up_matching.find_candidate(pool, old)
@@ -258,14 +258,14 @@ end
 section("up_matching.find_candidates exercises all three fallback tiers")
 do
   -- family match, then loose, then shared-token, in order.
-  local old = up_util.analyze_plugin(nil, "Reaktor5")
-  local reaktor6 = up_util.analyze_plugin("aumuRk6----", "Reaktor 6")
+  local old = up_plugin_analysis.analyze_plugin(nil, "Reaktor5")
+  local reaktor6 = up_plugin_analysis.analyze_plugin("aumuRk6----", "Reaktor 6")
   reaktor6.path = "aumuRk6----"
   local fam = up_matching.find_candidates({ reaktor6 }, old)
   check(#fam == 1, "family tier matches Reaktor5 -> Reaktor6")
   -- With no family match, the loose tier must fire.
-  local old2 = up_util.analyze_plugin(nil, "Kick - Nicky Romero")
-  local kick2 = up_util.analyze_plugin("/P/Kick2.vst", "Kick 2")
+  local old2 = up_plugin_analysis.analyze_plugin(nil, "Kick - Nicky Romero")
+  local kick2 = up_plugin_analysis.analyze_plugin("/P/Kick2.vst", "Kick 2")
   kick2.path = "/P/Kick2.vst"
   local loose = up_matching.find_candidates({ kick2 }, old2)
   check(#loose == 1, "loose tier matches Kick - Nicky Romero -> Kick 2")
