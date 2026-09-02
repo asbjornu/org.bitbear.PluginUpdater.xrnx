@@ -16,6 +16,20 @@ them.
 - Lua patterns here have **no `|` alternation**; use character classes
   (`[%s>]`).
 
+## Workflow
+
+- Work in the `renoise/3.5.4` Git worktree, which points to the path
+  within Renoise this tool is installed into.
+- Never change existing branches to point to a worktree. If you need a
+  worktree, create a new branch.
+- `main` should always point to the canonical repository location, not the
+  installation path of the tool or any other worktree directory.
+- Keep `luacheck` clean on `lib/*.lua` and `tests/run.lua` (LibDeflate is
+  vendored + excluded).
+- Commit messages: terse, no "the user" references. Keep the header at
+  maximum 50 characters, repeat it in the body if truncation is necessary.
+  Wrap the body at 72 characters.
+
 ## Layout
 
 - `main.lua` entry → loads `up_ui`; `lib/up_*.lua` are modules;
@@ -35,12 +49,3 @@ them.
   LuaRocks rockspec is broken). `up_songxml.parse_instruments` uses
   `find_all(root,"Instrument")` so `<InstrumentGroup>` nesting and
   attribute-bearing tags are handled structurally.
-
-## Workflow
-
-- Work in the `renoise/3.5.4` Git worktree.
-- Keep `luacheck` clean on `lib/*.lua` and `tests/run.lua` (LibDeflate is
-  vendored + excluded).
-- Commit messages: terse, no "the user" references. Keep the header at
-  maximum 50 characters, repeat it in the body if truncation is necessary.
-  Wrap the body at 72 characters.
