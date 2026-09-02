@@ -4,13 +4,15 @@ up_plugin_analysis.PROTOCOL_RANK = { CLAP = 4, VST3 = 3, VST2 = 2, VST = 2, AU =
 
 local DETECT_ORDER = { "CLAP", "VST3", "VST2", "VST", "AU", "LV2", "DSSI" }
 
-local NOISE = { audio = true, effects = true, generators = true, native = true, plugin = true }
+-- Words that are purely structural (category folders, the "native" namespace)
+-- and must never become the matched identity of a plugin.
+local IGNORED_SEGMENTS = { audio = true, effects = true, generators = true, native = true, plugin = true }
 
 -- Manufacturer / generic words to ignore when matching on a shared token. A shared
 -- vendor (e.g. "fabfilter") must not by itself count as a product match -- that
 -- would wrongly pair "Pro-MB" with "Pro-Q". Only a shared product word (e.g.
 -- "kick", "reaktor") is significant.
-local NONPRODUCT = {
+local NON_PRODUCT_TOKENS = {
   fabfilter = true, native = true, instruments = true, sonic = true, academy = true,
   ["u"] = true, ["he"] = true, apple = true, spitfire = true, orchestral = true,
   tools = true, lennardigital = true, tal = true, togu = true, alliance = true,
@@ -24,16 +26,16 @@ local NONPRODUCT = {
   way = true, ho = true, plugin = true,
 }
 
-function up_plugin_analysis.is_product_token(tok)
-  return not NONPRODUCT[tok]
+function up_plugin_analysis.is_product_token(token)
+  return not NON_PRODUCT_TOKENS[token]
 end
 
-function up_plugin_analysis.detect_protocol(s)
-  if type(s) ~= "string" then return nil end
-  local lower = s:lower()
-  for _, tok in ipairs(DETECT_ORDER) do
-    if lower:find(tok:lower(), 1, true) then
-      return tok
+function up_plugin_analysis.detect_protocol(text)
+  if type(text) ~= "string" then return nil end
+  local lowercased = text:lower()
+  for _, candidate in ipairs(DETECT_ORDER) do
+    if lowercased:find(candidate:lower(), 1, true) then
+      return candidate
     end
   end
   return nil
@@ -57,8 +59,8 @@ function up_plugin_analysis.is_plugin_path(path)
   return up_plugin_analysis.detect_protocol(path) ~= nil
 end
 
-function up_plugin_analysis.protocol_rank(p)
-  return up_plugin_analysis.PROTOCOL_RANK[p or ""] or 0
+function up_plugin_analysis.protocol_rank(protocol)
+  return up_plugin_analysis.PROTOCOL_RANK[protocol or ""] or 0
 end
 
 function up_plugin_analysis.strip_version(product)
@@ -66,9 +68,9 @@ function up_plugin_analysis.strip_version(product)
 end
 
 function up_plugin_analysis.extract_version(product)
-  local v = product:match("%s+[vV]?(%d+%.?%d*)%s*$")
-  if v then
-    return tonumber(v)
+  local version = product:match("%s+[vV]?(%d+%.?%d*)%s*$")
+  if version then
+    return tonumber(version)
   end
   return nil
 end
@@ -78,12 +80,12 @@ end
 -- both become "reaktor" (and "native instruments: reaktor 6" -> the same). Used
 -- for best-effort matching of missing plugins, where we can't transfer state
 -- anyway, so a newer major version is an acceptable replacement.
-function up_plugin_analysis.family_base(s)
-  if type(s) ~= "string" then return "" end
-  local t = s:lower()
-  t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
-  t = t:gsub("%s+", " "):match("^%s*(.-)%s*$") or t
-  return t
+function up_plugin_analysis.family_base(text)
+  if type(text) ~= "string" then return "" end
+  local lowercased = text:lower()
+  lowercased = lowercased:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
+  lowercased = lowercased:gsub("%s+", " "):match("^%s*(.-)%s*$") or lowercased
+  return lowercased
 end
 
 -- Significant word tokens of a plugin base (version stripped, lowercased),
@@ -93,65 +95,65 @@ end
 -- which distinguishes it from "Pro-MB"); subset comparison makes stray
 -- single-char tokens harmless because a match requires ALL of one side's tokens
 -- to appear in the other.
-function up_plugin_analysis.token_set(s)
-  if type(s) ~= "string" then return {} end
-  local t = s:lower()
-  t = t:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
-  t = t:gsub("%s+", " ")
+function up_plugin_analysis.token_set(text)
+  if type(text) ~= "string" then return {} end
+  local lowercased = text:lower()
+  lowercased = lowercased:gsub("%s*[vV]?%d+%.?%d*%s*$", "")
+  lowercased = lowercased:gsub("%s+", " ")
   local set = {}
-  for tok in t:gmatch("[%w%.]+") do
-    local w = tok:gsub("[%.%-]", "")
+  for token in lowercased:gmatch("[%w%.]+") do
+    local word = token:gsub("[%.%-]", "")
     -- Strip a version suffix that is glued to the product word (e.g. "reaktor5"
     -- -> "reaktor"), so major-version variants still share a token and match.
-    w = w:gsub("%d+$", "")
-    if #w > 0 then set[w] = true end
+    word = word:gsub("%d+$", "")
+    if #word > 0 then set[word] = true end
   end
   return set
 end
 
 -- True when every significant token of `a` also appears in `b`.
 function up_plugin_analysis.token_subset(a, b)
-  for k in pairs(a) do
-    if not b[k] then return false end
+  for token in pairs(a) do
+    if not b[token] then return false end
   end
   return true
 end
 
-local function split_segments(s)
-  s = s:gsub("[:/\\]+", "|")
-  local segs = {}
-  for raw_seg in s:gmatch("[^|]+") do
-    local seg = raw_seg:match("^%s*(.-)%s*$")
-    if seg ~= "" and not NOISE[seg:lower()] then
-      table.insert(segs, seg)
+local function split_segments(text)
+  text = text:gsub("[:/\\]+", "|")
+  local segments = {}
+  for raw_segment in text:gmatch("[^|]+") do
+    local segment = raw_segment:match("^%s*(.-)%s*$")
+    if segment ~= "" and not IGNORED_SEGMENTS[segment:lower()] then
+      table.insert(segments, segment)
     end
   end
-  return segs
+  return segments
 end
 
 -- Category prefixes that may appear at the start of a device name, e.g.
 -- "Effects: FabFilter Pro-Q 3" or "Generators: Sylenth1".
-local CATEGORY = { effects = true, generators = true, native = true, instruments = true }
+local CATEGORY_PREFIXES = { effects = true, generators = true, native = true, instruments = true }
 
 -- Strip a single leading "Tag:" prefix (protocol or category) so that names
 -- sourced from different APIs normalize the same way, e.g.
 --   "VST: FabFilter Pro-Q 3"  -> "FabFilter Pro-Q 3"
 --   "Effects: FabFilter Pro-Q 3" -> "FabFilter Pro-Q 3"
 -- A genuine mid-name colon (e.g. "Lennardigital: Sylenth1") is preserved.
-local function strip_leading_tag(s, protocol)
-  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+local function strip_leading_tag(text, protocol)
+  local tag = text:match("^%s*([%w%+%-]+)%s*:%s*")
   if tag then
-    local t = tag:lower()
-    if t == (protocol and protocol:lower()) or CATEGORY[t] then
-      return s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    local lowercased_tag = tag:lower()
+    if lowercased_tag == (protocol and protocol:lower()) or CATEGORY_PREFIXES[lowercased_tag] then
+      return text:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
     end
   end
-  return s
+  return text
 end
 
 -- Architecture/marker tokens that are pure metadata and must not participate
 -- in cross-protocol matching, e.g. "ValhallaRoom_x64" vs "ValhallaRoom".
-local ARCH_TOKENS = { "x64", "x86", "win64", "win32", "aax", "vst3", "vst2", "au" }
+local ARCHITECTURE_TOKENS = { "x64", "x86", "win64", "win32", "aax", "vst3", "vst2", "au" }
 
 -- Normalize a human-readable plugin name into a comparable lowercase token:
 -- drop "(...)" annotations, a leading category/protocol tag, any embedded
@@ -159,18 +161,18 @@ local ARCH_TOKENS = { "x64", "x86", "win64", "win32", "aax", "vst3", "vst2", "au
 -- version is intentionally kept so that different major versions do NOT collide
 -- (Pro-Q 2 != Pro-Q 3).
 local function clean_display_name(name, protocol)
-  local s = tostring(name or ""):lower()
-  s = strip_leading_tag(s, protocol)
-  s = s:gsub("%b()", " ")
+  local text = tostring(name or ""):lower()
+  text = strip_leading_tag(text, protocol)
+  text = text:gsub("%b()", " ")
   if protocol then
-    s = s:gsub(protocol:lower(), " ")
+    text = text:gsub(protocol:lower(), " ")
   end
-  s = s:gsub("[%._%-]+", " ")
-  for _, tok in ipairs(ARCH_TOKENS) do
-    s = s:gsub("%s*" .. tok .. "%s*", " ")
+  text = text:gsub("[%._%-]+", " ")
+  for _, token in ipairs(ARCHITECTURE_TOKENS) do
+    text = text:gsub("%s*" .. token .. "%s*", " ")
   end
-  s = s:gsub("%s+", " "):match("^%s*(.-)%s*$")
-  return s
+  text = text:gsub("%s+", " "):match("^%s*(.-)%s*$")
+  return text
 end
 
 function up_plugin_analysis.analyze_plugin(path, name)
@@ -186,9 +188,9 @@ function up_plugin_analysis.analyze_plugin(path, name)
     if protocol then
       work = work:gsub(protocol:lower(), "", 1)
     end
-    local segs = split_segments(work)
-    if #segs >= 1 then
-      product = clean_display_name(segs[#segs], protocol)
+    local segments = split_segments(work)
+    if #segments >= 1 then
+      product = clean_display_name(segments[#segments], protocol)
     end
   end
 
@@ -211,8 +213,8 @@ function up_plugin_analysis.analyze_plugin(path, name)
 end
 
 function up_plugin_analysis.rank(info)
-  local v = info.version or 0
-  return up_plugin_analysis.protocol_rank(info.protocol) * 1000 + v
+  local version = info.version or 0
+  return up_plugin_analysis.protocol_rank(info.protocol) * 1000 + version
 end
 
 -- Given a preset/instrument name and the owning plugin's analysis, return the
@@ -220,44 +222,44 @@ end
 -- plugin product "lennardigital sylenth1" + preset "VST: Sylenth1 (ARP 303 Saw)"
 -- -> "ARP 303 Saw". Returns "" when the preset adds nothing new.
 function up_plugin_analysis.strip_redundant_prefix(preset, protocol, analysis)
-  local basetoks = {}
+  local base_tokens = {}
   local base = (analysis and analysis.product) or ""
-  for w in base:gmatch("%S+") do
-    basetoks[w] = true
+  for word in base:gmatch("%S+") do
+    base_tokens[word] = true
   end
   if not preset or preset == "" then
     return ""
   end
-  local s = tostring(preset)
-  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+  local text = tostring(preset)
+  local tag = text:match("^%s*([%w%+%-]+)%s*:%s*")
   if tag then
-    local t = tag:lower()
-    if t == (protocol and protocol:lower()) or CATEGORY[t] then
-      s = s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    local lowercased_tag = tag:lower()
+    if lowercased_tag == (protocol and protocol:lower()) or CATEGORY_PREFIXES[lowercased_tag] then
+      text = text:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
     end
   end
-  s = s:gsub("%b()", " ")
+  text = text:gsub("%b()", " ")
   -- Note: colons are intentionally preserved (not folded to spaces) so a combined
   -- "Ensemble: Preset" label like "Razor: Dark Dreams 1" survives intact; a leading
   -- protocol-style tag is still stripped by the block above when it matches.
-  s = s:gsub("[%._%-]+", " ")
-  local low = s:lower()
-  for _, tok in ipairs(ARCH_TOKENS) do
-    local st, en = low:find("%s*" .. tok .. "%s*")
-    while st do
-      s = s:sub(1, st - 1) .. " " .. s:sub(en + 1)
-      low = s:lower()
-      st, en = low:find("%s*" .. tok .. "%s*")
+  text = text:gsub("[%._%-]+", " ")
+  local lower = text:lower()
+  for _, token in ipairs(ARCHITECTURE_TOKENS) do
+    local start, finish = lower:find("%s*" .. token .. "%s*")
+    while start do
+      text = text:sub(1, start - 1) .. " " .. text:sub(finish + 1)
+      lower = text:lower()
+      start, finish = lower:find("%s*" .. token .. "%s*")
     end
   end
   while true do
-    local w = s:match("^%s*(%S+)")
-    if not w or not basetoks[w:lower()] then
+    local word = text:match("^%s*(%S+)")
+    if not word or not base_tokens[word:lower()] then
       break
     end
-    s = s:gsub("^%s*%S+%s*", "", 1)
+    text = text:gsub("^%s*%S+%s*", "", 1)
   end
-  return s:gsub("%s+", " "):match("^%s*(.-)%s*$")
+  return text:gsub("%s+", " "):match("^%s*(.-)%s*$")
 end
 
 -- Recover the user's preset label from an instrument's *name*, when that name is
@@ -272,48 +274,48 @@ end
 -- Unlike strip_redundant_prefix this PRESERVES parenthetical content, because that
 -- is exactly where the user's preset frequently lives.
 function up_plugin_analysis.instrument_preset_label(name, protocol, analysis)
-  local s = tostring(name or ""):match("^%s*(.-)%s*$")
-  if s == "" then return "" end
+  local text = tostring(name or ""):match("^%s*(.-)%s*$")
+  if text == "" then return "" end
   -- Drop a leading "PROTO: " (protocol) tag.
-  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+  local tag = text:match("^%s*([%w%+%-]+)%s*:%s*")
   if tag then
-    local t = tag:lower()
-    if t == (protocol and protocol:lower()) or CATEGORY[t] then
-      s = s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    local lowercased_tag = tag:lower()
+    if lowercased_tag == (protocol and protocol:lower()) or CATEGORY_PREFIXES[lowercased_tag] then
+      text = text:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
     end
   end
   -- Drop leading words that are part of the plugin's own product identity; stop at
   -- the first word that is not the plugin, or at an opening parenthesis.
   local base = (analysis and analysis.product) or ""
   local base_tokens = {}
-  for t in base:lower():gmatch("[%w%.%-]+") do
-    local tok = t:gsub("[%.%-]", ""):gsub("%d+$", "")
-    if tok ~= "" then base_tokens[tok] = true end
+  for token in base:lower():gmatch("[%w%.%-]+") do
+    local word = token:gsub("[%.%-]", ""):gsub("%d+$", "")
+    if word ~= "" then base_tokens[word] = true end
   end
-  local function is_plugin_word(w)
-    local n = 0
-    for wtok in w:gsub("[%.%-_]", " "):lower():gmatch("[^%s]+") do
-      n = n + 1
-      local ww = wtok:gsub("%d+$", "")
-      if ww == "" or not base_tokens[ww] then return false end
+  local function is_plugin_word(word)
+    local count = 0
+    for word_token in word:gsub("[%.%-_]", " "):lower():gmatch("[^%s]+") do
+      count = count + 1
+      local stripped = word_token:gsub("%d+$", "")
+      if stripped == "" or not base_tokens[stripped] then return false end
     end
-    return n > 0
+    return count > 0
   end
-  local cur = 1
-  while cur <= #s do
-    while cur <= #s and s:sub(cur, cur):match("%s") do cur = cur + 1 end
-    if cur > #s then break end
-    if s:sub(cur, cur) == "(" then break end
-    local j = cur
-    while j <= #s and s:sub(j, j):match("[%w%.%-]") do j = j + 1 end
-    local word = s:sub(cur, j - 1)
+  local cursor = 1
+  while cursor <= #text do
+    while cursor <= #text and text:sub(cursor, cursor):match("%s") do cursor = cursor + 1 end
+    if cursor > #text then break end
+    if text:sub(cursor, cursor) == "(" then break end
+    local j = cursor
+    while j <= #text and text:sub(j, j):match("[%w%.%-]") do j = j + 1 end
+    local word = text:sub(cursor, j - 1)
     if is_plugin_word(word) then
-      cur = j
+      cursor = j
     else
       break
     end
   end
-  local rest = s:sub(cur):match("^%s*(.-)%s*$")
+  local rest = text:sub(cursor):match("^%s*(.-)%s*$")
   if not rest or rest == "" then return "" end
   -- Drop a single surrounding pair of parentheses so the label reads cleanly.
   rest = rest:match("^%(%s*(.-)%s*%)$") or rest
@@ -326,30 +328,30 @@ end
 -- "VST3: FabFilter Pro-Q 3". Strips a leading category/protocol tag (since we
 -- re-emit the protocol), drops architecture markers, and unifies separators.
 function up_plugin_analysis.format_plugin(name, protocol)
-  local s = tostring(name or "")
-  local tag = s:match("^%s*([%w%+%-]+)%s*:%s*")
+  local text = tostring(name or "")
+  local tag = text:match("^%s*([%w%+%-]+)%s*:%s*")
   if tag then
-    local t = tag:lower()
-    if t == (protocol and protocol:lower()) or CATEGORY[t] then
-      s = s:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
+    local lowercased_tag = tag:lower()
+    if lowercased_tag == (protocol and protocol:lower()) or CATEGORY_PREFIXES[lowercased_tag] then
+      text = text:gsub("^%s*[%w%+%-]+%s*:%s*", "", 1)
     end
   end
-  s = s:gsub("%b()", " ")
-  s = s:gsub("[%._%:%-]+", " ")
-  local low = s:lower()
-  for _, tok in ipairs(ARCH_TOKENS) do
-    local st, en = low:find("%s*" .. tok .. "%s*")
-    while st do
-      s = s:sub(1, st - 1) .. " " .. s:sub(en + 1)
-      low = s:lower()
-      st, en = low:find("%s*" .. tok .. "%s*")
+  text = text:gsub("%b()", " ")
+  text = text:gsub("[%._%:%-]+", " ")
+  local lower = text:lower()
+  for _, token in ipairs(ARCHITECTURE_TOKENS) do
+    local start, finish = lower:find("%s*" .. token .. "%s*")
+    while start do
+      text = text:sub(1, start - 1) .. " " .. text:sub(finish + 1)
+      lower = text:lower()
+      start, finish = lower:find("%s*" .. token .. "%s*")
     end
   end
-  s = s:gsub("%s+", " "):match("^%s*(.-)%s*$")
+  text = text:gsub("%s+", " "):match("^%s*(.-)%s*$")
   if protocol and protocol ~= "" then
-    return protocol:upper() .. ": " .. s
+    return protocol:upper() .. ": " .. text
   end
-  return s
+  return text
 end
 
 return up_plugin_analysis
