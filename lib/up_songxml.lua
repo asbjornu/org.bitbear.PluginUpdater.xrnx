@@ -1,6 +1,8 @@
 local up_songxml = {}
 
 local up_zip = require("up_zip")
+local up_xml = require("up_xml")
+local up_preset = require("up_preset")
 
 -- When a plugin is missing on the machine, renoise.song().instruments[i]
 -- .plugin_properties.plugin_device is nil, so the live API exposes no path or
@@ -17,12 +19,43 @@ local up_zip = require("up_zip")
 
 local _cache = { file = nil, data = nil }
 
-local function read_song_xml(_song)
+-- up_xml.descendant_text returns "" (truthy) for an empty or self-closing element,
+-- e.g. <PluginShortDisplayName/>. Left as-is that empty string wins every
+-- `a or b` fallback and, worse, gets used as a lookup key (out[""] = entry), so a
+-- later name lookup with a blank string would resolve to an unrelated instrument.
+-- Collapse absent/blank fields to nil so the fallbacks and indexes behave.
+local function nonempty(s)
+  if type(s) == "string" and s ~= "" then return s end
+  return nil
+end
+
+local function read_song_xml(song)
   local ok_app, app = pcall(function() return renoise.app() end)
   if not ok_app or not app then
     return nil
   end
-  local path = app.song_filename
+  -- The absolute path to the loaded/saved song is exposed as song().file_name
+  -- (empty string when the song has never been saved). Older/incorrect spellings
+  -- (app.song_filename, song().song_filename) are kept only as fallbacks in case a
+  -- Renoise build differs. Guarding each access is essential: reading a property
+  -- that does not exist on the API object throws, which would otherwise silence
+  -- recovery entirely -- and without recovery, missing plugins whose instrument
+  -- name carries no protocol token (e.g. "Dark Dreams 1") can never be matched.
+  local path
+  local ok_f, fv = pcall(function() return song.file_name end)
+  if ok_f and fv and fv ~= "" then
+    path = fv
+  else
+    local ok_p, pv = pcall(function() return app.song_filename end)
+    if ok_p and pv and pv ~= "" then
+      path = pv
+    else
+      local ok_s, sv = pcall(function() return renoise.song().song_filename end)
+      if ok_s and sv and sv ~= "" then
+        path = sv
+      end
+    end
+  end
   if not path or path == "" then
     return nil
   end
@@ -52,23 +85,54 @@ function up_songxml.parse_instruments(xml)
   if type(xml) ~= "string" or xml == "" then
     return out
   end
+  local root = up_xml.parse(xml)
+  if not root then
+    return out
+  end
+  -- Walk the XML tree and collect every <Instrument> element at any depth, including
+  -- those nested inside an <InstrumentGroup>. Grouping is handled structurally, not by
+  -- fragile string matching, so it can never desync the index or drop an instrument.
+  -- Each entry is also indexed by name / display name / identifier so callers can
+  -- look a plugin up by the live instrument's name -- robust against reordering or
+  -- non-plugin instruments (e.g. ext. MIDI) that shift the indices between the song
+  -- and its Song.xml.
+  local instruments = up_xml.find_all(root, "Instrument")
   local idx = 0
-  for block in xml:gmatch("<Instrument[^>]*>(.-)</Instrument>") do
+  for _, block in ipairs(instruments) do
     idx = idx + 1
-    local ptype = block:match("<PluginType>(.-)</PluginType>")
+    local ptype = nonempty(up_xml.descendant_text(block, "PluginType"))
+    -- A missing/empty <PluginType> means this is not a plugin, so never classify
+    -- it as one (otherwise malformed/edge Song.xml inputs mis-include samplers).
     if ptype then
-      local identifier = block:match("<PluginIdentifier>(.-)</PluginIdentifier>")
-      local disp = block:match("<PluginDisplayName>(.-)</PluginDisplayName>")
-      local sdisp = block:match("<PluginShortDisplayName>(.-)</PluginShortDisplayName>")
-      local iname = block:match("<Name>(.-)</Name>")
-      out[idx] = {
+      local identifier = nonempty(up_xml.descendant_text(block, "PluginIdentifier"))
+      local disp = nonempty(up_xml.descendant_text(block, "PluginDisplayName"))
+      local sdisp = nonempty(up_xml.descendant_text(block, "PluginShortDisplayName"))
+      local iname = nonempty(up_xml.descendant_text(block, "Name"))
+      -- Recover the loaded ensemble/preset name that Renoise stores inside the
+      -- plugin's opaque ParameterChunk (base64-encoded CDATA). For Reaktor / Kontakt
+      -- this is the "file://.../Name.ext" path of the loaded ensemble; surfacing it
+      -- lets the tool show the preset even when the plugin itself failed to load on
+      -- this machine (so the live API exposes no preset name). Attribute-bearing and
+      -- indented ParameterChunks are handled by the tree parser for free.
+      local preset_name
+      local cdata = up_xml.descendant_cdata(block, "ParameterChunk")
+      if cdata then
+        preset_name = up_preset.extract_name({ active_preset_data = cdata })
+      end
+      local entry = {
         index = idx,
         instrument_name = iname,
         protocol = ptype,
         identifier = identifier,
         display_name = disp or sdisp,
         short_display_name = sdisp or disp,
+        preset_name = preset_name,
       }
+      out[idx] = entry
+      if iname then out[iname] = entry end
+      if disp then out[disp] = entry end
+      if sdisp then out[sdisp] = entry end
+      if identifier then out[identifier] = entry end
     end
   end
   return out
