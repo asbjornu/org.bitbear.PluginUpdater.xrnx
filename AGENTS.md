@@ -24,11 +24,16 @@ them.
   worktree, create a new branch.
 - `main` should always point to the canonical repository location, not the
   installation path of the tool or any other worktree directory.
-- Keep `luacheck` clean on `lib/*.lua` and `tests/run.lua` (LibDeflate is
-  vendored + excluded).
+- Commit before considering the task done.
+- Group commits logically by feature or fix.
+- If the a fix applies to code added previously in the same branch,
+  squash the fix into the original commit.
+- Add tests for all new features to ensure correctness and high coverage.
 - Commit messages: terse, no "the user" references. Keep the header at
   maximum 50 characters, repeat it in the body if truncation is necessary.
   Wrap the body at 72 characters.
+- Keep `luacheck` clean on `lib/*.lua` and `tests/run.lua` (LibDeflate is
+  vendored + excluded).
 
 ## Layout
 
