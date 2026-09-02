@@ -1,4 +1,4 @@
-local up_songxml = {}
+local up_song_xml = {}
 
 local up_zip = require("up_zip")
 local up_xml = require("up_xml")
@@ -80,7 +80,7 @@ end
 -- that actually have a plugin (a <PluginType> element) are included, so samplers
 -- are skipped. Exposed separately from recover() so it can be unit-tested
 -- without a real .xrns file.
-function up_songxml.parse_instruments(xml)
+function up_song_xml.parse_instruments(xml)
   local out = {}
   if type(xml) ~= "string" or xml == "" then
     return out
@@ -141,17 +141,17 @@ end
 -- Recover plugin identity per instrument, keyed by 1-based instrument index
 -- (parallel to song.instruments). Only instruments that actually have a plugin
 -- (a <PluginType> element) are included, so samplers are skipped.
-function up_songxml.recover(song)
+function up_song_xml.recover(song)
   local xml = read_song_xml(song)
   if not xml then
     return {}
   end
-  return up_songxml.parse_instruments(xml)
+  return up_song_xml.parse_instruments(xml)
 end
 
-function up_songxml.invalidate_cache()
+function up_song_xml.invalidate_cache()
   _cache.file = nil
   _cache.data = nil
 end
 
-return up_songxml
+return up_song_xml

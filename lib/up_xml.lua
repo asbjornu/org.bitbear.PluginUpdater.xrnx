@@ -13,7 +13,7 @@
 --   { tag = "Song", attrs = { a = "b" }, children = { elem, ... }, text = "...", cdata = "..." }
 --
 -- Elements appear in `children` in document order. Text and CDATA are captured on
--- the parent element (matching the shape up_songxml expects). Only the subset
+-- the parent element (matching the shape up_song_xml expects). Only the subset
 -- Renoise emits is needed, but the full parser handles more.
 
 local up_xml = {}

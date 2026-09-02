@@ -4,7 +4,7 @@
 
 section("up_xml.parse (pure-Lua XML tree)")
 do
-  -- Validates the tree parser used by up_songxml: nested elements, attributes,
+  -- Validates the tree parser used by up_song_xml: nested elements, attributes,
   -- <InstrumentGroup> handling, descendant text, and CDATA.
   local xml = [==[<?xml version="1.0"?>
  <Song>

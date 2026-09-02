@@ -61,7 +61,7 @@ do
   local declared = {
     LibDeflate = true, LibStub = true, arg = true, luacov = true, renoise = true, unpack = true,
     -- Product modules, exposed as globals so the spec files can use them.
-    up_util = true, up_matching = true, up_preset = true, up_songxml = true,
+    up_util = true, up_matching = true, up_preset = true, up_song_xml = true,
     up_xml = true, up_inventory = true, up_core = true, up_zip = true,
     up_swap = true, up_scheduler = true, up_ui = true,
     -- Shared test helpers, exposed as globals.
@@ -180,7 +180,7 @@ _G.observable = observable
 _G.up_util      = require("up_util")
 _G.up_matching  = require("up_matching")
 _G.up_preset    = require("up_preset")
-_G.up_songxml   = require("up_songxml")
+_G.up_song_xml   = require("up_song_xml")
 _G.up_xml       = require("up_xml") -- pure-Lua XML parser exercised by the xml spec
 _G.up_inventory = require("up_inventory")
 _G.up_core      = require("up_core") -- loaded so its module is counted in coverage
@@ -220,7 +220,7 @@ end
 _G.section("compile-check all sources")
 local sources = { "main.lua", "lib/up_core.lua", "lib/up_inventory.lua",
   "lib/up_matching.lua", "lib/up_preset.lua", "lib/up_scheduler.lua",
-  "lib/up_songxml.lua", "lib/up_swap.lua", "lib/up_ui.lua", "lib/up_util.lua",
+  "lib/up_song_xml.lua", "lib/up_swap.lua", "lib/up_ui.lua", "lib/up_util.lua",
   "lib/up_zip.lua" }
 for _, s in ipairs(sources) do
   local f, err = loadfile(root .. "/" .. s)

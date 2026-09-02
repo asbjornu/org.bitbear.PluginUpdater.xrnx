@@ -1,5 +1,5 @@
 local up_util = require("up_util")
-local up_songxml = require("up_songxml")
+local up_song_xml = require("up_song_xml")
 
 local up_inventory = {}
 
@@ -231,7 +231,7 @@ end
 
 function up_inventory.scan(song, yield_fn, on_progress, on_found, recovery)
   if not recovery and song then
-    local ok, r = pcall(function() return up_songxml.recover(song) end)
+    local ok, r = pcall(function() return up_song_xml.recover(song) end)
     recovery = ok and r or nil
   end
   local entries = {}
@@ -292,7 +292,7 @@ function up_inventory.scan_instrument_device(inst, recovery)
     return nil
   end
   if not recovery then
-    local ok, r = pcall(function() return up_songxml.recover(song) end)
+    local ok, r = pcall(function() return up_song_xml.recover(song) end)
     recovery = ok and r or nil
   end
   local ii = nil

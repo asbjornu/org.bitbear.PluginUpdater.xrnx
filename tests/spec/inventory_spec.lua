@@ -187,7 +187,7 @@ do
   -- plugin whose instrument name carried no protocol token (e.g. "Dark Dreams 1")
   -- was dropped. Scanning with song.file_name set must surface them.
   local xml = up_zip.extract(fixture, "Song.xml")
-  local recovery = up_songxml.parse_instruments(xml)
+  local recovery = up_song_xml.parse_instruments(xml)
   local instruments = {}
   for _, e in pairs(recovery) do
     if type(e) == "table" then
@@ -203,7 +203,7 @@ do
         plugin_properties = { plugin_loaded = false, plugin_device = nil } }
     end
   end
-  -- recovery left nil so scan() calls up_songxml.recover(song) itself, exercising
+  -- recovery left nil so scan() calls up_song_xml.recover(song) itself, exercising
   -- the real song.file_name path.
   local mock_song = { file_name = fixture, instruments = instruments, tracks = {} }
   local entries = up_inventory.scan(mock_song, nil, nil, nil)
