@@ -1,6 +1,6 @@
 # Plugin Updater
 
-![Build][build-badge]
+![Lint][lint-badge]
 ![Tests][tests-badge]
 [![codecov][codecov-badge]][codecov]
 ![License][license-badge]
@@ -158,7 +158,7 @@ a global key binding you can assign in the Keyboard preferences).
   are reported as `skipped-up-to-date`, and that a missing instrument is
   recovered from `Song.xml` and upgraded.
 
-[build-badge]: https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/build.yml/badge.svg
+[lint-badge]: https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/lint.yml/badge.svg
 [codecov-badge]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx/branch/renoise%2F3.5.4/graph/badge.svg
 [codecov]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx
 [license-badge]: https://img.shields.io/github/license/asbjornu/org.bitbear.PluginUpdater.xrnx

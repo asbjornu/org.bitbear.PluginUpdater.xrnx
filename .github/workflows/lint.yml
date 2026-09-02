@@ -1,23 +1,9 @@
-name: Build
+name: Lint
 
 on: [push, pull_request]
 
 jobs:
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v7
-    - name: Install Lua 5.1 and LuaJIT
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y lua5.1 luajit
-        sudo ln -sf /usr/bin/luac5.1 /usr/local/bin/luac
-        luac -v
-        luajit -v
-    - name: LuaJIT syntax check
-      run: find "$(pwd)" -name '*.lua' -type f -print0 | while IFS= read -r -d '' f; do luajit -bl "$f" > /dev/null || exit 1; done
-
-  compile:
+  syntax:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
@@ -26,7 +12,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y luajit
         luajit -v
-    - name: luajit
+    - name: LuaJIT syntax check
       run: find "$(pwd)" -name '*.lua' -type f -print0 | while IFS= read -r -d '' f; do luajit -bl "$f" > /dev/null || exit 1; done
 
   luacheck:
