@@ -27,11 +27,12 @@ do
   }
 
   -- Drive the view-building + list-management logic with the ViewBuilder stub.
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
-  up_ui._status_text = up_ui._vb:text{ text = "" }
-  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._scrollbar = up_ui._view_builder:scrollbar{
+    width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._view_builder:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._view_builder:button{ text = "Upgrade", active = false }
 
   up_ui.clear_list()
   check(up_ui._header_row ~= nil, "clear_list builds header row")
@@ -59,8 +60,9 @@ do
   check(type(up_ui._saved_sel) == "table", "capture_selections returns a table")
   check(up_ui.summary():find("Done") == 1, "summary returns a Done. string")
 
-  -- Exercise the full dialog + scan flow; the slicer is driven manually via the
-  -- app-idle observable, since there is no real GUI event loop headlessly.
+  -- Exercise the full dialog + scan flow; the coroutine scheduler is driven
+  -- manually via the app-idle observable, since there is no real GUI event loop
+  -- headlessly.
   local ok_dlg, err_dlg = pcall(function()
     up_ui.show_dialog()
     local idle = _G.renoise.tool().app_idle_observable
@@ -70,14 +72,35 @@ do
   check(ok_dlg, "show_dialog + scan flow runs headlessly" .. (ok_dlg and "" or (": " .. tostring(err_dlg))))
 end
 
+section("up_ui.show_dialog clears stale in-progress flags")
+do
+  local up_ui = require("up_ui")
+  -- Simulate a previous dialog that was closed mid-scan/upgrade, leaving the
+  -- long-lived flags stuck true. A fresh dialog must reset them, or its
+  -- Upgrade button would wrongly act as Stop and bail.
+  up_ui._scanning = true
+  up_ui._upgrading = true
+  up_ui._abort = true
+  up_ui._dialog = nil
+  local ok_dlg, err_dlg = pcall(function() up_ui.show_dialog() end)
+  check(ok_dlg, "show_dialog runs after stale flags" .. (ok_dlg and "" or (": " .. tostring(err_dlg))))
+  -- A plain scan does not set _upgrading/_abort, so their reset is observable.
+  check(up_ui._upgrading == false and up_ui._abort == false,
+    "show_dialog resets stale _upgrading/_abort flags")
+  local idle = _G.renoise.tool().app_idle_observable
+  for _ = 1, 400 do idle._fire() end
+  up_ui.stop_all()
+end
+
 section("up_ui shows preset and carry-over in both columns")
 do
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
-  up_ui._status_text = up_ui._vb:text{ text = "" }
-  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._scrollbar = up_ui._view_builder:scrollbar{
+    width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._view_builder:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._view_builder:button{ text = "Upgrade", active = false }
   up_ui.clear_list()
 
   -- Explicit preset name: shown in both columns, carried over to the upgrade.
@@ -107,11 +130,12 @@ do
   -- as a secondary detail. The preset name must be preserved and carried over, not
   -- replaced by the ensemble name.
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
-  up_ui._status_text = up_ui._vb:text{ text = "" }
-  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._scrollbar = up_ui._view_builder:scrollbar{
+    width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._view_builder:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._view_builder:button{ text = "Upgrade", active = false }
   up_ui.clear_list()
 
   local rec = { kind = "instrument", instrument_name = "Dark Dreams 1",
@@ -140,11 +164,12 @@ end
 section("up_ui never shows instrument name as a carried-over preset")
 do
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
-  up_ui._status_text = up_ui._vb:text{ text = "" }
-  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._scrollbar = up_ui._view_builder:scrollbar{
+    width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._status_text = up_ui._view_builder:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._view_builder:button{ text = "Upgrade", active = false }
   up_ui.clear_list()
 
   -- Instrument whose only identity is its Renoise name (no real preset name): it
@@ -242,7 +267,7 @@ end
 section("coverage: up_ui dialog-close watch and scroll")
 do
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._view_builder = _G.renoise.ViewBuilder
   up_ui._dialog = { visible = true }
   up_ui._closed = false
   up_ui.watch_dialog()
@@ -255,10 +280,11 @@ do
   check(true, "stop_all runs without error")
 
   -- on_scroll updates the scroll window and reapplies the visible slice.
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._scrollbar = up_ui._vb:scrollbar{ width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
-  up_ui._data_rows = { up_ui._vb:row{}, up_ui._vb:row{}, up_ui._vb:row{} }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._scrollbar = up_ui._view_builder:scrollbar{
+    width = 16, height = 340, min = 0, max = 12, step = 1, pagestep = 12 }
+  up_ui._data_rows = { up_ui._view_builder:row{}, up_ui._view_builder:row{}, up_ui._view_builder:row{} }
   up_ui._mounted = {}
   up_ui.on_scroll(1)
   check(true, "on_scroll + apply_scroll run without error")
@@ -267,10 +293,10 @@ end
 section("coverage: up_ui.do_upgrade runs an end-to-end upgrade")
 do
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._status_text = up_ui._vb:text{ text = "" }
-  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._status_text = up_ui._view_builder:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._view_builder:button{ text = "Upgrade", active = false }
   up_ui._dialog = { visible = true }
   up_ui._closed = false
 
@@ -299,7 +325,7 @@ do
   local rc = { entry = rec, candidates = { cand }, candidate = cand, status = nil }
   up_ui._results = { rc }
   up_ui._row_views = { { popup = { value = 2, active = true }, candidates = { cand },
-    result_txt = up_ui._vb:text{ text = "" }, old_tf = up_ui._vb:text{ text = "" } } }
+    result_txt = up_ui._view_builder:text{ text = "" }, old_text_field = up_ui._view_builder:text{ text = "" } } }
 
   up_ui.do_upgrade()
   local idle = _G.renoise.tool().app_idle_observable
@@ -316,13 +342,14 @@ end
 section("coverage: up_ui.do_upgrade with no selection and reconcile reuse")
 do
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
-  up_ui._list_box = up_ui._vb:column{}
-  up_ui._status_text = up_ui._vb:text{ text = "" }
-  up_ui._upgrade_btn = up_ui._vb:button{ text = "Upgrade", active = false }
+  up_ui._view_builder = _G.renoise.ViewBuilder
+  up_ui._list_box = up_ui._view_builder:column{}
+  up_ui._status_text = up_ui._view_builder:text{ text = "" }
+  up_ui._upgrade_btn = up_ui._view_builder:button{ text = "Upgrade", active = false }
   up_ui._results = { { entry = { kind = "instrument", analysis = up_plugin_analysis.analyze_plugin(nil, "Reaktor5") },
     candidates = {}, candidate = nil } }
-  local rv_no = { popup = { value = 1, active = false }, candidates = {}, result_txt = up_ui._vb:text{ text = "" } }
+  local rv_no = { popup = { value = 1, active = false }, candidates = {}, result_txt =
+    up_ui._view_builder:text{ text = "" } }
   up_ui._row_views = { rv_no }
   up_ui.do_upgrade()
   check(true, "do_upgrade with no selection reports a friendly status")
@@ -337,10 +364,10 @@ end
 section("up_ui result icon colours + tooltips map every status")
 do
   local up_ui = require("up_ui")
-  up_ui._vb = _G.renoise.ViewBuilder
+  up_ui._view_builder = _G.renoise.ViewBuilder
 
   local function styled(status, detail)
-    local rv = { result_txt = up_ui._vb:text{ text = "", color = {0,0,0}, tooltip = "" } }
+    local rv = { result_txt = up_ui._view_builder:text{ text = "", color = {0,0,0}, tooltip = "" } }
     up_ui.set_result(rv, status, detail)
     return rv.result_txt
   end
