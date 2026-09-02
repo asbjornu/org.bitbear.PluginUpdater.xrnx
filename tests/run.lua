@@ -302,9 +302,20 @@ do
   -- A `name=\"...\"` attribute must only match a real `name` attribute, not the
   -- tail of e.g. `plugin_name=\"...\"`: otherwise the plugin name would shadow the
   -- actual preset name.
-  check(up_preset.extract_name({ active_preset_data = '<device plugin_name="Serum" name="Init"></device>' }) == "Init",
-    "name=\"...\" attribute is not confused with plugin_name")
+   check(up_preset.extract_name({ active_preset_data = '<device plugin_name="Serum" name="Init"></device>' }) == "Init",
+     "name=\"...\" attribute is not confused with plugin_name")
 end
+
+section("up_preset.is_init_preset")
+check(up_preset.is_init_preset("Def It Setting") == true, "FabFilter default -> init")
+check(up_preset.is_init_preset("Init") == true, "Serum Init -> init")
+check(up_preset.is_init_preset("Default") == true, "Default -> init")
+check(up_preset.is_init_preset("Factory") == true, "Factory -> init")
+check(up_preset.is_init_preset("My Patch") == false, "real patch is not init")
+check(up_preset.is_init_preset("Divination") == false, "init-substring word is not init")
+check(up_preset.is_init_preset(nil) == false, "nil -> false")
+check(up_preset.is_init_preset("") == false, "empty -> false")
+
 
 section("up_preset._extract_chunk_name skips binary blobs before decoding")
 do

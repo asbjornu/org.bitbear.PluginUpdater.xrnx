@@ -66,6 +66,12 @@ local function rec_preset_name(rec)
     explicit = up_preset.extract_name({ active_preset_data = rec.active_preset_data })
   end
 
+  -- Normalise vendor-specific factory-default labels ("Init", "Def It Setting",
+  -- "Default", ...) to a single "init" token for display only.
+  if explicit and up_preset.is_init_preset(explicit) then
+    explicit = "init"
+  end
+
   -- For a missing/recovered plugin the live API exposes no real preset, so the
   -- user's instrument name is the meaningful label (e.g. "Dark Dreams 1", or
   -- "Make It Bright" from "VST: Reaktor5 (Make It Bright)"). Prefer that over the

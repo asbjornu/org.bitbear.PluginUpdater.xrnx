@@ -108,4 +108,28 @@ function up_preset.extract_name(device)
   return nil
 end
 
+-- Preset names that denote a plugin's factory-initial / default state rather
+-- than a real user patch. Vendors label this inconsistently ("Init", "Default",
+-- "Def It Setting", "Factory", ...) so the UI normalises them to a single
+-- display token "init". This is display-only: extract_name keeps returning the
+-- real name so preset transfer can still match it in the replacement plugin.
+local _INIT_PATTERNS = {
+  "%f[%w]def",
+  "%f[%w]init",
+  "%f[%w]factory",
+}
+
+function up_preset.is_init_preset(name)
+  if type(name) ~= "string" or name == "" then
+    return false
+  end
+  local low = name:lower()
+  for _, p in ipairs(_INIT_PATTERNS) do
+    if low:match(p) then
+      return true
+    end
+  end
+  return false
+end
+
 return up_preset
