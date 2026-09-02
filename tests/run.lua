@@ -187,7 +187,7 @@ _G.up_core      = require("up_core") -- loaded so its module is counted in cover
 _G.up_zip       = require("up_zip")
 _G.up_swap      = require("up_swap")
 _G.up_scheduler = require("up_scheduler") -- pure logic; safe to load headlessly
-_G.up_ui        = require("up_ui")
+_G.up_ui = require("up_ui")
 
 -- Shared test helpers ---------------------------------------------------------
 _G.failures = 0

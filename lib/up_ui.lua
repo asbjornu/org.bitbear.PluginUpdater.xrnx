@@ -4,6 +4,7 @@ local up_plugin_analysis = require("up_plugin_analysis")
 local up_inventory = require("up_inventory")
 local up_matching = require("up_matching")
 local up_preset = require("up_preset")
+local up_result_display = require("up_result_display")
 
 local PLUGIN_ROWS_VISIBLE = 12
 local LIST_HEIGHT = 340
@@ -172,8 +173,16 @@ end
 function up_ui.detach_observers()
   local song = renoise.song()
   if song then
-    pcall(function() if up_ui._tn then song.tracks_observable:remove_notifier(up_ui._tn) end end)
-    pcall(function() if up_ui._in then song.instruments_observable:remove_notifier(up_ui._in) end end)
+    pcall(function()
+      if up_ui._tn then
+        song.tracks_observable:remove_notifier(up_ui._tn)
+      end
+    end)
+    pcall(function()
+      if up_ui._in then
+        song.instruments_observable:remove_notifier(up_ui._in)
+      end
+    end)
     if up_ui._dn then
       for _, d in ipairs(up_ui._dn) do
         pcall(function() d.obs:remove_notifier(d.fn) end)
@@ -344,85 +353,15 @@ end
 -- The "Result" column shows a coloured icon per row whose colour encodes the
 -- outcome category (green = fully upgraded, yellow = partially upgraded, red =
 -- failed, gray = not upgraded) and whose hover tooltip explains what happened.
--- Keeping the styles in one table means every upgrade outcome maps to exactly
--- one of the four colour categories the user asked for.
-local RESULT_COLORS = {
-  green = { 0, 180, 0 },
-  yellow = { 200, 170, 0 },
-  red = { 220, 60, 60 },
-  gray = { 150, 150, 150 },
-}
-
-local RESULT_STYLES = {
-  ["upgraded-with-parameters"] = {
-    color = RESULT_COLORS.green, label = "Upgraded",
-    tip = "Replacement loaded and the original preset/state was transferred exactly.",
-  },
-  ["upgraded-name-matched-preset"] = {
-    color = RESULT_COLORS.green, label = "Upgraded",
-    tip = "Replacement loaded with a matching factory preset of the same name; your patch should be intact.",
-  },
-  ["upgraded-parameter-synth"] = {
-    color = RESULT_COLORS.yellow, label = "Partial",
-    tip = "Replacement loaded; matching parameters were re-applied by name, so some "
-      .. "settings may differ from the original.",
-  },
-  ["upgraded-default"] = {
-    color = RESULT_COLORS.yellow, label = "Partial",
-    tip = "Replacement loaded, but the original state could not be carried over, so it is at its default patch.",
-  },
-  ["up-to-date"] = {
-    color = RESULT_COLORS.gray, label = "Current",
-    tip = "Already the selected replacement; nothing to change.",
-  },
-  ["skipped-up-to-date"] = {
-    color = RESULT_COLORS.gray, label = "Current",
-    tip = "Already up to date; no replacement needed.",
-  },
-  ["skipped-no-candidate-broken"] = {
-    color = RESULT_COLORS.gray, label = "No match",
-    tip = "No replacement plugin could be found for this (broken) plugin.",
-  },
-  ["skipped-transfer-rejected"] = {
-    color = RESULT_COLORS.red, label = "Failed",
-    tip = "The replacement could not be loaded or inserted.",
-  },
-  ["error"] = {
-    color = RESULT_COLORS.red, label = "Failed",
-    tip = "The upgrade failed with an error.",
-  },
-}
-
-local RESULT_PENDING = {
-  color = RESULT_COLORS.gray, label = "Pending",
-  tip = "Not upgraded yet. Choose a replacement and press Upgrade.",
-}
-
-local function result_style(status)
-  if not status or status == "" then
-    return RESULT_PENDING
-  end
-  return RESULT_STYLES[status] or {
-    color = RESULT_COLORS.gray, label = "Unknown",
-    tip = "Unrecognised result: " .. tostring(status),
-  }
-end
+-- The colour/label/tooltip mapping lives in up_result_display so it can be
+-- unit-tested and reused without the rest of the dialog.
+local RESULT_COLORS = up_result_display.RESULT_COLORS
 
 -- Paint the row's Result icon from an upgrade outcome. The text colour is the
 -- category signal; the tooltip is the human-readable explanation the user asked
 -- for on hover.
-function up_ui.set_result(rv, status, detail)
-  if not rv or not rv.result_txt then
-    return
-  end
-  local st = result_style(status)
-  rv.result_txt.text = "● " .. st.label
-  rv.result_txt.color = st.color
-  local tip = st.tip
-  if detail and detail ~= "" then
-    tip = tip .. "\n\n" .. detail
-  end
-  rv.result_txt.tooltip = tip
+function up_ui.set_result(result_view, status, detail)
+  up_result_display.set_result(result_view.result_txt, status, detail)
 end
 
 -- Snapshot the current dropdown choices, keyed by entry signature, so a
@@ -472,8 +411,10 @@ end
 
 function up_ui.recompute_visible()
   local hb = renoise.ViewBuilder
-  local header_h = (up_ui._header_h and up_ui._header_h > 0) and up_ui._header_h or hb.DEFAULT_CONTROL_HEIGHT
-  local row_h = (up_ui._row_h and up_ui._row_h > 0) and up_ui._row_h or hb.DEFAULT_CONTROL_HEIGHT
+  local header_height = up_ui._header_h
+  local row_height = up_ui._row_h
+  local header_h = (header_height and header_height > 0) and header_height or hb.DEFAULT_CONTROL_HEIGHT
+  local row_h = (row_height and row_height > 0) and row_height or hb.DEFAULT_CONTROL_HEIGHT
   local visible = math.max(1, math.floor((LIST_HEIGHT - header_h) / row_h))
   up_ui._visible = visible
   if up_ui._scrollbar then
@@ -702,7 +643,8 @@ function up_ui.spawn_scan(full)
         function(result)
           up_ui.fill_row(result)
           if up_ui._status_text then
-            up_ui._status_text.text = string.format("Found %d: %s", #up_ui._results, old_label(result.entry))
+            local found = string.format("Found %d: %s", #up_ui._results, old_label(result.entry))
+            up_ui._status_text.text = found
           end
         end)
       if up_ui._status_text then
@@ -803,7 +745,8 @@ function up_ui.spawn_scan(full)
         coroutine.yield()
         if up_ui._status_text then
           up_ui._status_text.text = string.format(
-            "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.", #up_ui._results)
+            "Found %d plugin device(s). Choose a replacement per row, then press 'Upgrade'.",
+            #up_ui._results)
         end
         if up_ui._upgrade_btn then
           up_ui._upgrade_btn.active = true
