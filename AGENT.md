@@ -30,8 +30,9 @@ them.
 
 ## XML parsing
 
-- `lib/up_xml.lua` is a hand-written **pure-Lua tree parser** (no
-  xml2lua/LuaExpat). `up_songxml.parse_instruments` uses
+- `lib/up_xml.lua` is a thin **pure-Lua tree builder over the vendored SLAXML
+  engine** (`lib/slaxml.lua`, MIT, committed directly into `lib/` because the
+  LuaRocks rockspec is broken). `up_songxml.parse_instruments` uses
   `find_all(root,"Instrument")` so `<InstrumentGroup>` nesting and
   attribute-bearing tags are handled structurally.
 

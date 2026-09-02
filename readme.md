@@ -61,13 +61,15 @@ previous preset/state.
 - Each row shows the current plugin and a **Replace with** dropdown. By
   default the best candidate is pre-selected; set a row to **"Keep
   current"** to leave that device alone. The current device's active preset
-  name is shown when available.
+  name is shown when available (for missing plugins it is recovered from
+  `Song.xml`).
 - Press **Upgrade** to swap the selected devices. While running the button
   becomes **Stop** (the swaps already performed are kept). Nothing is
   written to disk unless you save the song yourself.
 - The status line reports progress, and a final summary counts results per
-  status (e.g. `upgraded-with-parameters`, `upgraded-parameter-synth`,
-  `upgraded-default`, `skipped-up-to-date`, `skipped-no-candidate-broken`).
+  status (e.g. `upgraded-with-parameters`, `upgraded-name-matched-preset`,
+  `upgraded-parameter-synth`, `upgraded-default`, `up-to-date`,
+  `skipped-transfer-rejected`, `skipped-no-candidate-broken`).
 
 ## Missing / broken plugins
 
@@ -75,13 +77,16 @@ previous preset/state.
    `plugin_device` is `nil`, so the live API exposes no path or name. The
    tool reads the song's own `.xrns` archive (a zip containing `Song.xml`,
    which records every plugin's identity, including missing ones) to recover
-   the original display name, then matches and upgrades it. `Song.xml` is
-   parsed by the dependency-free pure-Lua tree parser in `lib/up_xml.lua`
-   (`up_songxml.parse_instruments` walks it with `find_all(root,"Instrument")`,
-   so `<InstrumentGroup>` nesting and attribute-bearing tags are handled
-   structurally, never by fragile string matching). The replacement loads at
-   default state unless the instrument name resolves to a preset in the
-   installed plugin's own bank.
+    the original display name, then matches and upgrades it. `Song.xml` is
+    parsed by the pure-Lua tree parser in `lib/up_xml.lua`, a thin builder over
+    the vendored [SLAXML][] engine (`lib/slaxml.lua`, MIT-licensed and committed
+    directly into `lib/` because the LuaRocks rockspec is broken).
+    `up_songxml.parse_instruments` walks it with `find_all(root,"Instrument")`,
+    so `<InstrumentGroup>` nesting and attribute-bearing tags are handled
+    structurally, never by fragile string matching. The preset name is recovered
+    from the song's `ParameterChunk` (base64 CDATA in `Song.xml`) or the
+    instrument name, so the replacement can load that preset from the installed
+    plugin's own bank; if no preset matches, it loads at default state.
 - **Broken *track* devices:** detected when `active_preset_data` raises an
   error; these are listed as broken and matched normally from their
   `device_path`/`name`.
@@ -92,10 +97,11 @@ previous preset/state.
 
 ## Limitations / things to verify in Renoise
 
-- **Preset-name fallback** parses the old `active_preset_data` XML for a
-  name; this is best-effort and plugin-dependent. For missing plugins
-  recovered from `Song.xml` only the identity is known, so state is
-  generally not transferable.
+- **Preset-name recovery** parses the old `active_preset_data` XML (live
+  plugins) or the song's `ParameterChunk` CDATA in `Song.xml` (missing
+  plugins) for a name; this is best-effort and plugin-dependent. When a preset
+  name is found it is loaded from the replacement's own bank, but if nothing
+  matches, state is generally not otherwise transferred for missing plugins.
 - **State transplant verification** accepts the transplant unless it raises
   an error or yields an empty state; some plugins re-encode preset data, so
   always sanity-check upgraded devices by ear.
@@ -159,4 +165,5 @@ a global key binding you can assign in the Keyboard preferences).
 [lua-badge]: https://img.shields.io/badge/Lua-5.1%20%2F%20LuaJIT-blue
 [renoise-api-badge]: https://img.shields.io/badge/Renoise%20API-6-blue
 [renoise]: https://www.renoise.com/
+[SLAXML]: https://github.com/Phrogz/SLAXML
 [tests-badge]: https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/test.yml/badge.svg
