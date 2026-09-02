@@ -1,0 +1,10 @@
+coverage:
+  ignore:
+    - "lib/LibDeflate.lua"
+    - "lib/slaxml.lua"
+    - "tests/**"
+    - "tools/**"
+    - "**/*.md"
+    - "manifest.xml"
+    - "*.rockspec"
+    - "AGENTS.md"
