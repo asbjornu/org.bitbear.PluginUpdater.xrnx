@@ -1,4 +1,4 @@
-# AGENT.md — org.bitbear.PluginUpdater
+# AGENTS.md — org.bitbear.PluginUpdater
 
 Renoise Lua tool that inventories outdated/broken plugins and upgrades
 them.
