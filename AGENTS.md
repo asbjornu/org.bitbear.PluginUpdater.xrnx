@@ -20,6 +20,14 @@ them.
 
 - Work in the `renoise/3.5.4` Git worktree, which points to the path
   within Renoise this tool is installed into.
+- **Before any edit or commit, verify the location.** Run
+  `git branch --show-current` and confirm it reports `renoise/3.5.4`, and
+  run `git rev-parse --show-toplevel` and confirm it equals the Renoise
+  install path
+  (`/Users/bitbear/Library/Preferences/Renoise/V3.5.4/Scripts/Tools/org.bitbear.PluginUpdater.xrnx`).
+  The `main` checkout under `/Users/bitbear/Dev/...` is the canonical repo
+  mirror only — never edit or commit there. If the session started in the
+  `main` checkout, stop and switch to the worktree before touching any file.
 - Never change existing branches to point to a worktree. If you need a
   worktree, create a new branch.
 - `main` should always point to the canonical repository location, not the
