@@ -52,13 +52,27 @@ do
   -- match_entries finds the Reaktor 6 candidate for a Reaktor 5 entry.
   local r6 = up_plugin_analysis.analyze_plugin("/P/Reaktor6.vst", "Reaktor 6"); r6.path = "/P/Reaktor6.vst"
   local rec = { kind = "instrument", analysis = up_plugin_analysis.analyze_plugin(nil, "Reaktor5") }
-  local results = up_core.match_entries({ rec }, { track = {}, inst = { r6 } }, nil, nil, nil)
+  local results = up_core.match_entries({ rec }, { track_pool = {}, instrument_pool = { r6 } }, nil, nil, nil)
   check(results[1] and #results[1].candidates >= 1, "match_entries offers Reaktor 6 for Reaktor 5")
 
   -- analyze runs scan + match end to end.
   up_core.invalidate_pool_cache()
   local ares = up_core.analyze(song, nil, nil, nil, nil)
   check(#ares >= 1, "analyze scans and matches the song")
+
+  -- The scan and match phases expose different callback shapes: on_scan gets an
+  -- entry record, on_match gets a result table. Verify both contracts hold.
+  up_core.invalidate_pool_cache()
+  local scan_shapes, match_shapes = {}, {}
+  up_core.analyze(song, nil, nil,
+    function(entry)
+      scan_shapes[#scan_shapes + 1] = (entry and entry.analysis and not entry.candidates) or false
+    end,
+    function(result)
+      match_shapes[#match_shapes + 1] = (result and result.entry and result.candidates ~= nil) or false
+    end)
+  check(#scan_shapes >= 1 and scan_shapes[1] == true, "analyze on_scan receives an entry record")
+  check(#match_shapes >= 1 and match_shapes[1] == true, "analyze on_match receives a result table")
 
   -- apply_one with no candidate reports a skip (broken vs up-to-date).
   local broken = up_core.apply_one(song, { entry = { kind = "instrument", broken = true,

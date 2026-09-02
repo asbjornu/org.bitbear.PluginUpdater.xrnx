@@ -700,7 +700,7 @@ function up_ui.spawn_scan(full)
         if not ok then
           renoise.app():show_warning("Plugin Updater error (pool):\n" .. tostring(err))
         end
-        up_ui._pools = { track = tp, inst = ip }
+        up_ui._pools = { track_pool = tp, instrument_pool = ip }
         up_ui._pool_done = true
       end,
       task_done,
@@ -736,7 +736,8 @@ function up_ui.spawn_scan(full)
             on_progress("Matching replacements", i, n)
           end
           coroutine.yield()
-          local pool = (rec.kind == "track") and up_ui._pools.track or up_ui._pools.inst
+          local pools = up_ui._pools
+          local pool = (rec.kind == "track") and pools.track_pool or pools.instrument_pool
           local cands = up_matching.find_candidates(pool, rec)
           local result = { entry = rec, candidates = cands, candidate = cands[1] }
           table.insert(up_ui._results, result)

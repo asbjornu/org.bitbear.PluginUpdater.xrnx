@@ -328,7 +328,7 @@ do
   check(true, "do_upgrade with no selection reports a friendly status")
 
   -- reconcile reuses the cached pool instead of a full rescan.
-  up_ui._pools = { track = {}, inst = {} }
+  up_ui._pools = { track_pool = {}, instrument_pool = {} }
   up_ui._closed = false
   up_ui.reconcile()
   check(true, "reconcile runs a same-song rescan without rebuilding the pool")
