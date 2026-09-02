@@ -893,6 +893,9 @@ function up_ui.show_dialog()
     renoise.app():show_warning("Open a song first.")
     return
   end
+  if dialog_is_open() then
+    return
+  end
   up_ui._song = song
   up_ui._closed = false
   up_ui._results = nil
