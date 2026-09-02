@@ -40,6 +40,7 @@ them.
 - Commit messages: terse, no "the user" references. Keep the header at
   maximum 50 characters, repeat it in the body if truncation is necessary.
   Wrap the body at 72 characters.
+- Commit with signature (`git commit -S`). `gpg` is installed with Homebrew.
 - Keep `luacheck` clean on `lib/*.lua` and `tests/run.lua` (LibDeflate is
   vendored + excluded).
 
