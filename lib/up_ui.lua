@@ -341,6 +341,90 @@ function up_ui.summary()
   return "Done. " .. table.concat(parts, "   ")
 end
 
+-- The "Result" column shows a coloured icon per row whose colour encodes the
+-- outcome category (green = fully upgraded, yellow = partially upgraded, red =
+-- failed, gray = not upgraded) and whose hover tooltip explains what happened.
+-- Keeping the styles in one table means every upgrade outcome maps to exactly
+-- one of the four colour categories the user asked for.
+local RESULT_COLORS = {
+  green = { 0, 180, 0 },
+  yellow = { 200, 170, 0 },
+  red = { 220, 60, 60 },
+  gray = { 150, 150, 150 },
+}
+
+local RESULT_STYLES = {
+  ["upgraded-with-parameters"] = {
+    color = RESULT_COLORS.green, label = "Upgraded",
+    tip = "Replacement loaded and the original preset/state was transferred exactly.",
+  },
+  ["upgraded-name-matched-preset"] = {
+    color = RESULT_COLORS.green, label = "Upgraded",
+    tip = "Replacement loaded with a matching factory preset of the same name; your patch should be intact.",
+  },
+  ["upgraded-parameter-synth"] = {
+    color = RESULT_COLORS.yellow, label = "Partial",
+    tip = "Replacement loaded; matching parameters were re-applied by name, so some "
+      .. "settings may differ from the original.",
+  },
+  ["upgraded-default"] = {
+    color = RESULT_COLORS.yellow, label = "Partial",
+    tip = "Replacement loaded, but the original state could not be carried over, so it is at its default patch.",
+  },
+  ["up-to-date"] = {
+    color = RESULT_COLORS.gray, label = "Current",
+    tip = "Already the selected replacement; nothing to change.",
+  },
+  ["skipped-up-to-date"] = {
+    color = RESULT_COLORS.gray, label = "Current",
+    tip = "Already up to date; no replacement needed.",
+  },
+  ["skipped-no-candidate-broken"] = {
+    color = RESULT_COLORS.gray, label = "No match",
+    tip = "No replacement plugin could be found for this (broken) plugin.",
+  },
+  ["skipped-transfer-rejected"] = {
+    color = RESULT_COLORS.red, label = "Failed",
+    tip = "The replacement could not be loaded or inserted.",
+  },
+  ["error"] = {
+    color = RESULT_COLORS.red, label = "Failed",
+    tip = "The upgrade failed with an error.",
+  },
+}
+
+local RESULT_PENDING = {
+  color = RESULT_COLORS.gray, label = "Pending",
+  tip = "Not upgraded yet. Choose a replacement and press Upgrade.",
+}
+
+local function result_style(status)
+  if not status or status == "" then
+    return RESULT_PENDING
+  end
+  return RESULT_STYLES[status] or {
+    color = RESULT_COLORS.gray, label = "Unknown",
+    tip = "Unrecognised result: " .. tostring(status),
+  }
+end
+
+-- Paint the row's Result icon from an upgrade outcome. The text colour is the
+-- category signal; the tooltip is the human-readable explanation the user asked
+-- for on hover.
+function up_ui.set_result(rv, status, detail)
+  if not rv or not rv.result_txt then
+    return
+  end
+  local st = result_style(status)
+  rv.result_txt.text = "● " .. st.label
+  rv.result_txt.color = st.color
+  local tip = st.tip
+  if detail and detail ~= "" then
+    tip = tip .. "\n\n" .. detail
+  end
+  rv.result_txt.tooltip = tip
+end
+
 -- Snapshot the current dropdown choices, keyed by entry signature, so a
 -- re-scan of the same song can restore them.
 function up_ui.capture_selections()
@@ -478,7 +562,7 @@ function up_ui.found_row(rec)
   local vb = up_ui._vb
   local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
   local popup = vb:popup{ items = { "(gathering replacements...)" }, value = 1, active = false, width = 320 }
-  local result_txt = vb:textfield{ text = "", active = false, width = 220 }
+  local result_txt = vb:text{ text = "", width = 220, color = RESULT_COLORS.gray, tooltip = "" }
   local row = vb:row{
     margin = 0,
     spacing = 6,
@@ -487,7 +571,9 @@ function up_ui.found_row(rec)
     old_tf, popup, result_txt,
   }
   table.insert(up_ui._data_rows, row)
-  table.insert(up_ui._row_views, { popup = popup, candidates = {}, result_txt = result_txt, old_tf = old_tf })
+  local rv = { popup = popup, candidates = {}, result_txt = result_txt, old_tf = old_tf }
+  table.insert(up_ui._row_views, rv)
+  up_ui.set_result(rv, nil)
   up_ui.refresh_scroll()
   if not up_ui._row_h and row.height and row.height > 0 then
     up_ui._row_h = row.height
@@ -819,10 +905,7 @@ function up_ui.do_upgrade()
         local res = up_core.apply_one(song, s.result, s.chosen)
         s.result.status = res.status
         s.result.detail = res.detail
-        if s.rv and s.rv.result_txt then
-          s.rv.result_txt.text = (res.status or "")
-            .. (res.detail and (" - " .. res.detail) or "")
-        end
+        up_ui.set_result(s.rv, res.status, res.detail)
         if up_ui._status_text then
           up_ui._status_text.text = string.format(
             "Upgrading %d/%d: %s", i, n, old_label(s.result.entry))

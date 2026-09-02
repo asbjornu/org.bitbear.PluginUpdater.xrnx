@@ -2097,6 +2097,59 @@ do
   check(okb and rb and rb.status == "skipped-transfer-rejected", "swap_instrument reports rejected when load fails")
 end
 
+section("up_ui result icon colours + tooltips map every status")
+do
+  local up_ui = require("up_ui")
+  up_ui._vb = _G.renoise.ViewBuilder
+
+  local function styled(status, detail)
+    local rv = { result_txt = up_ui._vb:text{ text = "", color = {0,0,0}, tooltip = "" } }
+    up_ui.set_result(rv, status, detail)
+    return rv.result_txt
+  end
+
+  -- Fully upgraded -> green, with the exact-transfer explanation.
+  local ok = styled("upgraded-with-parameters", nil)
+  check(ok.color[1] == 0 and ok.color[2] == 180 and ok.color[3] == 0,
+    "upgraded-with-parameters is green")
+  check(ok.text:find("Upgraded") ~= nil, "upgraded-with-parameters label is 'Upgraded'")
+  check(ok.tooltip:find("transferred exactly") ~= nil, "upgraded tooltip explains the transfer")
+
+  -- Partially upgraded -> yellow (default patch, no transfer).
+  local part = styled("upgraded-default", "preset not transferred: no method")
+  check(part.color[1] == 200 and part.color[2] == 170 and part.color[3] == 0,
+    "upgraded-default is yellow")
+  check(part.text:find("Partial") ~= nil, "upgraded-default label is 'Partial'")
+  check(part.tooltip:find("default patch") ~= nil, "upgraded-default tooltip mentions the default patch")
+  check(part.tooltip:find("preset not transferred") ~= nil, "detail is appended to the tooltip")
+
+  -- Failed upgrade -> red.
+  local fail = styled("skipped-transfer-rejected", "load_plugin failed: nil")
+  check(fail.color[1] == 220 and fail.color[2] == 60 and fail.color[3] == 60,
+    "skipped-transfer-rejected is red")
+  check(fail.text:find("Failed") ~= nil, "rejected label is 'Failed'")
+
+  local err = styled("error", "boom")
+  check(err.color[1] == 220 and err.color[3] == 60, "error is red")
+
+  -- Not upgraded -> gray (current / no candidate / unrecognised).
+  local cur = styled("up-to-date", nil)
+  check(cur.color[1] == 150 and cur.color[2] == 150 and cur.color[3] == 150,
+    "up-to-date is gray")
+  check(cur.text:find("Current") ~= nil, "up-to-date label is 'Current'")
+
+  local none = styled("skipped-no-candidate-broken", nil)
+  check(none.color[1] == 150, "no-candidate-broken is gray")
+
+  local pending = styled(nil, nil)
+  check(pending.color[1] == 150 and pending.text:find("Pending") ~= nil,
+    "pending (no status) is gray 'Pending'")
+
+  local unknown = styled("weird-status", nil)
+  check(unknown.color[1] == 150 and unknown.tooltip:find("weird-status", 1, true) ~= nil,
+    "unrecognised status is gray with its raw value in the tooltip")
+end
+
 -- ---------------------------------------------------------------------------
 print("\n" .. (failures == 0 and "ALL TESTS PASSED" or (failures .. " TEST(S) FAILED")))
 os.exit(failures == 0 and 0 or 1)
