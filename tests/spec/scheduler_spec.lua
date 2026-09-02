@@ -1,4 +1,4 @@
--- Tests for up_slicer: the coroutine scheduler that spreads long-running work
+-- Tests for up_scheduler: the coroutine scheduler that spreads long-running work
 -- (scan / swap) across Renoise's app-idle ticks so the script-busy watchdog is
 -- never tripped.
 
@@ -24,7 +24,7 @@ do
   end
   local phase2 = {}
   local done = false
-  up_slicer.run(
+  up_scheduler.run(
     function()
       for _ = 1, 3 do coroutine.yield() end          -- upgrade loop
       for i = 1, 4 do table.insert(phase2, i); coroutine.yield() end  -- reinspection loop

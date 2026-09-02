@@ -7,7 +7,7 @@ read_globals = {
   "renoise",
   -- Product modules, exposed as globals by the test runner.
   "up_util", "up_matching", "up_preset", "up_songxml", "up_xml",
-  "up_inventory", "up_core", "up_zip", "up_swap", "up_slicer", "up_ui",
+  "up_inventory",   "up_core", "up_zip", "up_swap", "up_scheduler", "up_ui",
   -- Shared test helpers, exposed as globals by the test runner.
   "check", "section", "analyze", "candidates_for", "failures", "fixture", "observable",
 }

@@ -1,5 +1,5 @@
 local up_core = require("up_core")
-local up_slicer = require("up_slicer")
+local up_scheduler = require("up_scheduler")
 local up_util = require("up_util")
 local up_inventory = require("up_inventory")
 local up_matching = require("up_matching")
@@ -732,7 +732,7 @@ function up_ui.spawn_scan(full)
     end
 
     -- Task A: scan the song's devices (rows appear immediately).
-    local na = up_slicer.run(
+    local na = up_scheduler.run(
       function()
         local ok, err = pcall(function()
           up_inventory.scan(song, yield, on_progress, function(rec)
@@ -749,7 +749,7 @@ function up_ui.spawn_scan(full)
       function() return up_ui._closed end)
 
     -- Task B: build the candidate pool (the long "gathering replacements" phase).
-    local nb = up_slicer.run(
+    local nb = up_scheduler.run(
       function()
         local tp, ip
         local ok, err = pcall(function()
@@ -765,7 +765,7 @@ function up_ui.spawn_scan(full)
       function() return up_ui._closed end)
 
     -- Task C: wait for both, then match + fill.
-    local nc = up_slicer.run(
+    local nc = up_scheduler.run(
       function()
         while not (up_ui._scan_done and up_ui._pool_done) do
           coroutine.yield()
@@ -783,7 +783,7 @@ function up_ui.spawn_scan(full)
   else
     -- Same-song reconcile: reuse the cached candidate pool so this stays
     -- cheap; only re-read the song's current devices and re-match them.
-    up_ui._scan_notifier = up_slicer.run(
+    up_ui._scan_notifier = up_scheduler.run(
       function()
         local entries = up_inventory.scan(song, function() coroutine.yield() end, on_progress,
           function(rec) up_ui.found_row(rec) end)
@@ -895,7 +895,7 @@ function up_ui.do_upgrade()
   -- grid isn't rebuilt (wiping the Result column) while we update rows in place.
   up_ui.detach_device_observers()
 
-  up_ui._upgrade_notifier = up_slicer.run(
+  up_ui._upgrade_notifier = up_scheduler.run(
     function()
       local n = #selected
       for i, s in ipairs(selected) do
