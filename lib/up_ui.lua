@@ -472,7 +472,7 @@ function up_ui.found_row(rec)
   local vb = up_ui._vb
   local old_tf = vb:textfield{ text = old_label(rec), active = false, width = 320 }
   local popup = vb:popup{ items = { "(gathering replacements...)" }, value = 1, active = false, width = 320 }
-  local result_txt = vb:text{ text = "", width = 220 }
+  local result_txt = vb:textfield{ text = "", active = false, width = 220 }
   local row = vb:row{
     margin = 0,
     spacing = 6,
