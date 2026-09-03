@@ -159,7 +159,7 @@ a global key binding you can assign in the Keyboard preferences).
   recovered from `Song.xml` and upgraded.
 
 [lint-badge]: https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/lint.yml/badge.svg
-[codecov-badge]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx/branch/renoise%2F3.5.4/graph/badge.svg
+[codecov-badge]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx/branch/main/graph/badge.svg
 [codecov]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx
 [license-badge]: https://img.shields.io/github/license/asbjornu/org.bitbear.PluginUpdater.xrnx
 [lua-badge]: https://img.shields.io/badge/Lua-5.1%20%2F%20LuaJIT-blue
