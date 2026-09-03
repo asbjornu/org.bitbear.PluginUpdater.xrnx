@@ -49,6 +49,12 @@ jobs:
       - name: Generate lcov coverage report
         run: luacov -r lcov
 
+      - name: Make coverage paths repo-relative
+        # luacov records absolute SF: paths; Codecov can't map them back to the
+        # repo, so it attributes ~0 lines and the badge collapses. Strip the CI
+        # workspace prefix so the report references lib/up_*.lua, main.lua, etc.
+        run: lua -e 'local p="coverage.lcov";local f=io.open(p);local s=f:read("*a");f:close();s=s:gsub("SF:"..os.getenv("PWD").."/","SF:");f=io.open(p,"w");f:write(s);f:close()'
+
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
@@ -68,6 +74,6 @@ jobs:
         uses: codecov/codecov-action@v7
         with:
           files: coverage.lcov
-          fail_ci_if_error: false
+          fail_ci_if_error: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
