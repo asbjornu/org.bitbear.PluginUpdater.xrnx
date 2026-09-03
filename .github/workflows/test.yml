@@ -49,11 +49,37 @@ jobs:
       - name: Generate lcov coverage report
         run: luacov -r lcov
 
-      - name: Make coverage paths repo-relative
-        # luacov records absolute SF: paths; Codecov can't map them back to the
-        # repo, so it attributes ~0 lines and the badge collapses. Strip the CI
-        # workspace prefix so the report references lib/up_*.lua, main.lua, etc.
-        run: lua -e 'local p="coverage.lcov";local f=io.open(p);local s=f:read("*a");f:close();s=s:gsub("SF:"..os.getenv("PWD").."/","SF:");f=io.open(p,"w");f:write(s);f:close()'
+      - name: Filter coverage report to product sources
+        # luacov records absolute SF: paths and (in some builds) may leave the
+        # vendored LibDeflate.lua / slaxml.lua in the report at 0%, dragging the
+        # percentage down. Rewrite the report so it only ever contains the
+        # product sources (lib/up_*.lua, main.lua) with repo-relative paths that
+        # Codecov can map. `$PWD` is used as a Lua *pattern*, so escape its
+        # metacharacters (e.g. the dots in `org.bitbear...`) and skip the rewrite
+        # when it's absent.
+        run: |
+          lua -e '
+            local p = "coverage.lcov"
+            local f = io.open(p)
+            if not f then os.exit(0) end
+            local s = f:read("*a")
+            f:close()
+            local pwd = os.getenv("PWD")
+            if pwd and pwd ~= "" then
+              local esc = pwd:gsub("[%(%)%.%%%+%-%*%?%[%]%^%$]", "%%%0")
+              s = s:gsub("SF:" .. esc .. "/", "SF:")
+            end
+            local out = {}
+            for block in s:gmatch("SF:.-end_of_record\n?") do
+              local sf = block:match("SF:([^\n]*)")
+              if sf and (sf:match("^lib/up_") or sf == "main.lua") then
+                out[#out + 1] = block
+              end
+            end
+            f = io.open(p, "w")
+            f:write(table.concat(out))
+            f:close()
+          '
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
@@ -65,15 +91,18 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Download coverage report
         uses: actions/download-artifact@v4
         with:
           name: coverage-lcov
+          path: .
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
           files: coverage.lcov
+          token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: true
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
