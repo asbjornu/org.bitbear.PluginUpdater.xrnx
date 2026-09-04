@@ -1,4 +1,4 @@
-# Plugin Updater
+# Plup
 
 ![Lint][lint-badge]
 ![Tests][tests-badge]
@@ -53,7 +53,7 @@ previous preset/state.
 
 ## Using it
 
-- Open a song, then pick **Tools → Plugin Updater** (or the global key
+- Open a song, then pick **Tools → Plup** (or the global key
   binding you can assign in the Keyboard preferences). The dialog opens and
   immediately scans, building the candidate list in the background
   ("gathering replacements" — the slow part, run concurrently with the song
@@ -134,17 +134,17 @@ below.
 ## Installation
 
 This folder *is* the tool bundle (named after the tool id,
-`org.bitbear.PluginUpdater.xrnx`).
+`org.bitbear.Plup.xrnx`).
 
-- **Easy:** drag the `org.bitbear.PluginUpdater.xrnx` folder into Renoise's
+- **Easy:** drag the `org.bitbear.Plup.xrnx` folder into Renoise's
   Tools directory, then restart Renoise (or use *Renoise → Help → Show
   Preferences → Plugins* to locate the folder). Renoise auto-detects tool
   folders.
 - **As a package:** zip the folder's contents into
-  `org.bitbear.PluginUpdater.xrnx` (the `.xrnx` extension *is* a zip) and
+  `org.bitbear.Plup.xrnx` (the `.xrnx` extension *is* a zip) and
   install it from Renoise's *Tools → Install* browser, or double-click it.
 
-After install you'll find **Tools → Plugin Updater** in the main menu (and
+After install you'll find **Tools → Plup** in the main menu (and
 a global key binding you can assign in the Keyboard preferences).
 
 ## Testing checklist (needs a live Renoise session)
@@ -158,12 +158,12 @@ a global key binding you can assign in the Keyboard preferences).
   are reported as `skipped-up-to-date`, and that a missing instrument is
   recovered from `Song.xml` and upgraded.
 
-[lint-badge]: https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/lint.yml/badge.svg
-[codecov-badge]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx/branch/main/graph/badge.svg
-[codecov]: https://codecov.io/gh/asbjornu/org.bitbear.PluginUpdater.xrnx
-[license-badge]: https://img.shields.io/github/license/asbjornu/org.bitbear.PluginUpdater.xrnx
+[lint-badge]: https://github.com/asbjornu/org.bitbear.Plup.xrnx/actions/workflows/lint.yml/badge.svg
+[codecov-badge]: https://codecov.io/gh/asbjornu/org.bitbear.Plup.xrnx/branch/main/graph/badge.svg
+[codecov]: https://codecov.io/gh/asbjornu/org.bitbear.Plup.xrnx
+[license-badge]: https://img.shields.io/github/license/asbjornu/org.bitbear.Plup.xrnx
 [lua-badge]: https://img.shields.io/badge/Lua-5.1%20%2F%20LuaJIT-blue
 [renoise-api-badge]: https://img.shields.io/badge/Renoise%20API-6-blue
 [renoise]: https://www.renoise.com/
 [SLAXML]: https://github.com/Phrogz/SLAXML
-[tests-badge]: https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx/actions/workflows/test.yml/badge.svg
+[tests-badge]: https://github.com/asbjornu/org.bitbear.Plup.xrnx/actions/workflows/test.yml/badge.svg

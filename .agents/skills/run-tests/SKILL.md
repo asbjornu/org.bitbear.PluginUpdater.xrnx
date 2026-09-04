@@ -1,6 +1,6 @@
 ---
 name: run-tests
-description: Run the Renoise PluginUpdater Lua test suite and keep it green
+description: Run the Renoise Plup Lua test suite and keep it green
 ---
 Run `lua tests/run.lua` (Homebrew `lua` at `/usr/local/bin`; do `export PATH=/usr/local/bin:$PATH` first).
 

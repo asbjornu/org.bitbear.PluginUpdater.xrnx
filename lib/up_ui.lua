@@ -320,7 +320,7 @@ local function watch_tick()
     end
   end)
   if not ok then
-    print(string.format("[PluginUpdater][watch] watch_tick ERROR: %s", tostring(error_message)))
+    print(string.format("[Plup][watch] watch_tick ERROR: %s", tostring(error_message)))
   end
 end
 
@@ -686,7 +686,7 @@ function up_ui.spawn_scan(full)
           end)
         end)
         if not ok then
-          renoise.app():show_warning("Plugin Updater error (scan):\n" .. tostring(error_message))
+          renoise.app():show_warning("Plup error (scan):\n" .. tostring(error_message))
         end
         up_ui._scan_done = true
       end,
@@ -701,7 +701,7 @@ function up_ui.spawn_scan(full)
           tp, ip = up_core.build_pools(song, yield, on_progress)
         end)
         if not ok then
-          renoise.app():show_warning("Plugin Updater error (pool):\n" .. tostring(error_message))
+          renoise.app():show_warning("Plup error (pool):\n" .. tostring(error_message))
         end
         up_ui._pools = { track_pool = tp or {}, instrument_pool = ip or {} }
         up_ui._pool_done = true
@@ -717,7 +717,7 @@ function up_ui.spawn_scan(full)
         end
         local ok, error_message = pcall(finalize_match)
         if not ok then
-          renoise.app():show_warning("Plugin Updater error (match):\n" .. tostring(error_message))
+          renoise.app():show_warning("Plup error (match):\n" .. tostring(error_message))
         end
       end,
       task_done,
@@ -1013,7 +1013,7 @@ function up_ui.show_dialog()
   up_ui._list_col = list_col
   up_ui._visible = PLUGIN_ROWS_VISIBLE
 
-  up_ui._dialog = renoise.app():show_custom_dialog("Plugin Updater", content)
+  up_ui._dialog = renoise.app():show_custom_dialog("Plup", content)
   up_ui.watch_dialog()
   up_ui.attach_observers()
   up_ui.start_scan()

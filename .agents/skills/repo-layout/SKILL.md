@@ -1,6 +1,6 @@
 ---
 name: repo-layout
-description: Module map for org.bitbear.PluginUpdater
+description: Module map for org.bitbear.Plup
 ---
 - `main.lua` loads `up_ui`; `lib/up_*.lua` are the logic modules; `tests/run.lua` is the full headless suite (mocked Renoise).
 - `up_inventory` scans the song → `up_matching` finds replacement candidates → `up_swap` performs the swap + state transfer → `up_core` orchestrates → `up_ui` is the dialog.
