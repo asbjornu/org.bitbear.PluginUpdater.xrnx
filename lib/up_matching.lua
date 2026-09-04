@@ -1,139 +1,138 @@
-local up_util = require("up_util")
-
 local up_matching = {}
 
-local function safeget(obj, k)
-  local ok, v = pcall(function() return obj[k] end)
+local up_plugin_analysis = require("up_plugin_analysis")
+
+-- Read a field from a possibly-opaque object (Renoise DeviceInfo userdata) without
+-- throwing, so a probe that isn't supported on a given object degrades gracefully.
+local function safe_get_field(object, key)
+  local ok, value = pcall(function() return object[key] end)
   if not ok then return nil end
-  return v
+  return value
 end
 
 local NAME_KEYS = { "name", "device_name", "display_name", "plugin_name", "product_name", "short_name" }
 
-
-local function track_name_of(info)
-  for _, k in ipairs(NAME_KEYS) do
-    local v = safeget(info, k)
-    if type(v) == "string" and v ~= "" then
-      return v
+-- Resolve the human-readable name of a track device from one of its info objects,
+-- tolerating both plain string fields and throwing getter functions.
+local function track_display_name_of(device_info)
+  for _, key in ipairs(NAME_KEYS) do
+    local value = safe_get_field(device_info, key)
+    if type(value) == "string" and value ~= "" then
+      return value
     end
-    if type(v) == "function" then
-      local ok, r = pcall(v, info)
-      if ok and type(r) == "string" and r ~= "" then
-        return r
+    if type(value) == "function" then
+      local ok, result = pcall(value, device_info)
+      if ok and type(result) == "string" and result ~= "" then
+        return result
       end
     end
   end
   return nil
 end
 
-local function track_infos(track)
-  -- available_devices  -> loadable full paths (VST = readable, VST3 = opaque UID,
-  --   AU = 4-char code). available_device_infos -> DeviceInfo objects, PARALLEL
-  --   to available_devices. Zip them so each pool entry keeps a loadable path AND
-  --   a readable name, which is the only reliable key for matching across
-  --   protocols (DeviceInfo.device_path is nil in this binding).
-  local okD, strs = pcall(function() return track.available_devices end)
-  local okI, infos = pcall(function() return track.available_device_infos end)
-  if okD and strs and #strs > 0 then
-    local out = {}
-    for i, p in ipairs(strs) do
-      local nm
-      if okI and infos and infos[i] then
-        nm = track_name_of(infos[i])
+-- Collect the (path, name) pairs for a track's available devices. Renoise exposes
+-- available_devices (loadable full paths; VST readable, VST3 opaque UID, AU 4-char
+-- code) and available_device_infos (DeviceInfo objects) in parallel; zip them so
+-- each pool entry keeps a loadable path AND a readable name -- the only reliable
+-- key for matching across protocols (DeviceInfo.device_path is nil in this binding).
+local function collect_track_device_infos(track)
+  local ok_devices, device_paths = pcall(function() return track.available_devices end)
+  local ok_infos, device_infos = pcall(function() return track.available_device_infos end)
+  if ok_devices and device_paths and #device_paths > 0 then
+    local entries = {}
+    for index, device_path in ipairs(device_paths) do
+      local device_name
+      if ok_infos and device_infos and device_infos[index] then
+        device_name = track_display_name_of(device_infos[index])
       end
-      out[#out + 1] = { device_path = p, device_name = nm }
+      entries[#entries + 1] = { device_path = device_path, device_name = device_name }
     end
-    return out
+    return entries
   end
   return nil
 end
 
--- Structural dump of a track's available_device_infos to discover which field
--- carries the human-readable plugin name. Renoise DeviceInfo is opaque userdata,
--- so we probe a candidate list of property getters and report type/value.
-
-function up_matching.build_track_pool(song, yield_fn, on_progress, fallback_pool)
+function up_matching.build_track_pool(song, yield_function, on_progress, fallback_pool)
   local pool = {}
   local seen = {}
-  local infos = nil
-  for ti = 1, #song.tracks do
+  local device_infos = nil
+  for track_index = 1, #song.tracks do
     if on_progress then
-      on_progress("Indexing track plugins", ti, #song.tracks)
+      on_progress("Indexing track plugins", track_index, #song.tracks)
     end
-    if yield_fn then
-      yield_fn()
+    if yield_function then
+      yield_function()
     end
-    if not infos then
-      local t = track_infos(song.tracks[ti])
-      if t and #t > 0 then
-        infos = t
+    if not device_infos then
+      local track_entries = collect_track_device_infos(song.tracks[track_index])
+      if track_entries and #track_entries > 0 then
+        device_infos = track_entries
       end
     else
       break
     end
   end
-  if infos then
-    for j, info in ipairs(infos) do
-      local dp
-      if type(info) == "table" then
-        dp = info.device_path
-      elseif type(info) == "string" then
-        dp = info
+  if device_infos then
+    for index, entry in ipairs(device_infos) do
+      local device_path
+      if type(entry) == "table" then
+        device_path = entry.device_path
+      elseif type(entry) == "string" then
+        device_path = entry
       end
-      local dn = (type(info) == "table") and info.device_name or nil
-      if dp and not up_util.is_native_path(dp) and not seen[dp] then
-        seen[dp] = true
-        local a = up_util.analyze_plugin(dp, dn)
-        a.path = dp
-        a.name = dn
-        table.insert(pool, a)
+      local device_name = (type(entry) == "table") and entry.device_name or nil
+      if device_path and not up_plugin_analysis.is_native_path(device_path) and not seen[device_path] then
+        seen[device_path] = true
+        local analysis = up_plugin_analysis.analyze_plugin(device_path, device_name)
+        analysis.path = device_path
+        analysis.name = device_name
+        table.insert(pool, analysis)
       end
-      if yield_fn and (j % 50 == 0) then
-        yield_fn()
+      if yield_function and (index % 50 == 0) then
+        yield_function()
       end
     end
   end
   if #pool == 0 and fallback_pool then
-    for _, a in ipairs(fallback_pool) do
-      local p = tostring(a.path or "")
+    for _, analysis in ipairs(fallback_pool) do
+      local path = tostring(analysis.path or "")
         :gsub("[Gg]enerators", "Effects")
         :gsub("[Gg]enerator", "Effect")
-      if p ~= "" and not up_util.is_native_path(p) and not seen[p] then
-        seen[p] = true
-        local a2 = up_util.analyze_plugin(p, a.product or a.name)
-        a2.path = p
-        table.insert(pool, a2)
+      if path ~= "" and not up_plugin_analysis.is_native_path(path) and not seen[path] then
+        seen[path] = true
+        local analysis2 = up_plugin_analysis.analyze_plugin(path, analysis.product or analysis.name)
+        analysis2.path = path
+        table.insert(pool, analysis2)
       end
     end
   end
   return pool
 end
 
-function up_matching.build_instrument_pool(song, yield_fn, on_progress)
+function up_matching.build_instrument_pool(song, yield_function, on_progress)
   local pool = {}
   local seen = {}
-  local infos = nil
-  for ii = 1, #song.instruments do
+  local plugin_infos = nil
+  for instrument_index = 1, #song.instruments do
     if on_progress then
-      on_progress("Indexing instrument plugins", ii, #song.instruments)
+      on_progress("Indexing instrument plugins", instrument_index, #song.instruments)
     end
-    if yield_fn then
-      yield_fn()
+    if yield_function then
+      yield_function()
     end
-    if not infos then
-      local ok, i = pcall(function()
-        return song.instruments[ii].plugin_properties.available_plugin_infos
+    if not plugin_infos then
+      local ok, available_infos = pcall(function()
+        return song.instruments[instrument_index].plugin_properties.available_plugin_infos
       end)
-      if ok and i and #i > 0 then
-        infos = i
+      if ok and available_infos and #available_infos > 0 then
+        plugin_infos = available_infos
       end
     else
       break
     end
   end
-  if infos then
-    for j, info in ipairs(infos) do
+  if plugin_infos then
+    for index, plugin_info in ipairs(plugin_infos) do
       -- We got this entry from `available_plugin_infos`, which lists plugins
       -- only, so trust the name rather than gating on the path. For VST3 (and
       -- some AU) instruments `info.path` is an opaque UID / 4-char code with no
@@ -141,9 +140,9 @@ function up_matching.build_instrument_pool(song, yield_fn, on_progress)
       -- plugin (e.g. "Kick 2") would vanish from the candidate pool. The name
       -- is the reliable key for matching; `info.path` is still kept because it
       -- is the handle Renoise uses to actually load the plugin.
-      local nm = info.name
-      if type(nm) ~= "string" or nm == "" then
-        nm = info.path
+      local plugin_name = plugin_info.name
+      if type(plugin_name) ~= "string" or plugin_name == "" then
+        plugin_name = plugin_info.path
       end
       -- available_plugin_infos yields loadable plugin handles, so a usable path
       -- is required: a nil/empty path cannot be loaded and would later blow up
@@ -151,43 +150,44 @@ function up_matching.build_instrument_pool(song, yield_fn, on_progress)
       -- VST3/AU paths are opaque UIDs but are still valid, non-empty string
       -- handles Renoise loads by, so gate on a non-empty string rather than on
       -- path shape.
-      if type(info.path) == "string" and info.path ~= "" then
-        if type(nm) == "string" and nm ~= "" and not up_util.is_native_path(nm) then
-          if not seen[info.path] then
-            seen[info.path] = true
-            local a = up_util.analyze_plugin(info.path, nm)
-            a.path = info.path
-            a.name = nm
-            table.insert(pool, a)
+      if type(plugin_info.path) == "string" and plugin_info.path ~= "" then
+        local native_name = up_plugin_analysis.is_native_path(plugin_name)
+        if type(plugin_name) == "string" and plugin_name ~= "" and not native_name then
+          if not seen[plugin_info.path] then
+            seen[plugin_info.path] = true
+            local analysis = up_plugin_analysis.analyze_plugin(plugin_info.path, plugin_name)
+            analysis.path = plugin_info.path
+            analysis.name = plugin_name
+            table.insert(pool, analysis)
           end
         end
       end
-      if yield_fn and (j % 50 == 0) then
-        yield_fn()
+      if yield_function and (index % 50 == 0) then
+        yield_function()
       end
     end
   end
   return pool
 end
 
-function up_matching.vendor_ok(c, old)
-  if old.vendor == "" or c.vendor == "" then
+function up_matching.vendor_ok(candidate, old_analysis)
+  if old_analysis.vendor == "" or candidate.vendor == "" then
     return true
   end
-  return c.vendor == old.vendor
+  return candidate.vendor == old_analysis.vendor
 end
 
-function up_matching.candidate_matches(c, old)
-  if not old then
+function up_matching.candidate_matches(candidate, old_analysis)
+  if not old_analysis then
     return false
   end
-  if c.path == old.raw then
+  if candidate.path == old_analysis.raw then
     return false
   end
-  if c.base ~= old.base then
+  if candidate.base ~= old_analysis.base then
     return false
   end
-  return up_matching.vendor_ok(c, old)
+  return up_matching.vendor_ok(candidate, old_analysis)
 end
 
 -- Best-effort match used for broken/missing plugins, where we can't transfer
@@ -196,19 +196,20 @@ end
 -- the old plugin's (or vice versa), which tolerates vendor-prefix asymmetry
 -- ("Native Instruments: Reaktor5" <-> "Reaktor6") and artist suffixes
 -- ("Kick - Nicky Romero" <-> "Kick 2"), while still rejecting unrelated plugins.
-function up_matching.candidate_matches_loose(c, old)
-  if not old then
+function up_matching.candidate_matches_loose(candidate, old_analysis)
+  if not old_analysis then
     return false
   end
-  if c.path == old.raw then
+  if candidate.path == old_analysis.raw then
     return false
   end
-  local tc = up_util.token_set(c.base)
-  local to = up_util.token_set(old.base)
-  if not next(tc) or not next(to) then
+  local candidate_tokens = up_plugin_analysis.token_set(candidate.base)
+  local old_tokens = up_plugin_analysis.token_set(old_analysis.base)
+  if not next(candidate_tokens) or not next(old_tokens) then
     return false
   end
-  return up_util.token_subset(tc, to) or up_util.token_subset(to, tc)
+  return up_plugin_analysis.token_subset(candidate_tokens, old_tokens)
+    or up_plugin_analysis.token_subset(old_tokens, candidate_tokens)
 end
 
 -- Last-resort match for plugins we could only identify by their live instrument
@@ -217,20 +218,20 @@ end
 -- >= 4), treat them as the same product. e.g. "Kick - Nicky Romero" and
 -- "Kick 2" both carry "kick", so the missing Kick surfaces as a Kick 2 upgrade.
 -- Requiring a long shared token keeps unrelated plugins from matching.
-function up_matching.candidate_matches_shared(c, old)
-  if not old then
+function up_matching.candidate_matches_shared(candidate, old_analysis)
+  if not old_analysis then
     return false
   end
-  if c.path == old.raw then
+  if candidate.path == old_analysis.raw then
     return false
   end
-  local tc = up_util.token_set(c.base)
-  local to = up_util.token_set(old.base)
-  if not next(tc) or not next(to) then
+  local candidate_tokens = up_plugin_analysis.token_set(candidate.base)
+  local old_tokens = up_plugin_analysis.token_set(old_analysis.base)
+  if not next(candidate_tokens) or not next(old_tokens) then
     return false
   end
-  for k in pairs(tc) do
-    if #k >= 4 and to[k] and up_util.is_product_token(k) then
+  for token in pairs(candidate_tokens) do
+    if #token >= 4 and old_tokens[token] and up_plugin_analysis.is_product_token(token) then
       return true
     end
   end
@@ -243,23 +244,23 @@ function up_matching.find_candidate(pool, old_analysis)
   end
   local best = nil
   local best_rank = nil
-  for _, c in ipairs(pool) do
-    if up_matching.candidate_matches(c, old_analysis) then
-      if best == nil or up_util.rank(c) > best_rank then
-        best = c
-        best_rank = up_util.rank(c)
+  for _, candidate in ipairs(pool) do
+    if up_matching.candidate_matches(candidate, old_analysis) then
+      if best == nil or up_plugin_analysis.rank(candidate) > best_rank then
+        best = candidate
+        best_rank = up_plugin_analysis.rank(candidate)
       end
     end
   end
   return best
 end
 
--- old_or_rec may be the analysis table or the full inventory rec. Exact matches
--- (same product + version, any protocol) are preferred; when none exist we fall
--- back to a version/name-flexible family match. That covers missing plugins
--- recovered from the song, and healthy plugins whose installed equivalent differs
--- in version or branding -- e.g. AU "FabFilter FF Pro MB" -> VST3 "FabFilter
--- Pro-MB", or Reaktor5 -> Reaktor6.
+-- old_or_record may be the analysis table or the full inventory record. Exact
+-- matches (same product + version, any protocol) are preferred; when none exist
+-- we fall back to a version/name-flexible family match. That covers missing
+-- plugins recovered from the song, and healthy plugins whose installed equivalent
+-- differs in version or branding -- e.g. AU "FabFilter FF Pro MB" -> VST3
+-- "FabFilter Pro-MB", or Reaktor5 -> Reaktor6.
 -- Same-product match across versions: the candidate shares the old plugin's
 -- product family (its base with the trailing version stripped), so e.g. both
 -- "Pro-L" and "Pro-L 2" collapse to "fabfilter pro l" and match each other.
@@ -267,23 +268,23 @@ end
 -- versions so an installed newer release is offered as an upgrade. Unlike the
 -- loose token match it never crosses into a different product, so "Pro-Q 3" is
 -- never offered for "Pro-L".
-function up_matching.candidate_matches_family(c, old)
-  if not old then
+function up_matching.candidate_matches_family(candidate, old_analysis)
+  if not old_analysis then
     return false
   end
-  if c.path == old.raw then
+  if candidate.path == old_analysis.raw then
     return false
   end
-  if up_util.family_base(c.base) ~= up_util.family_base(old.base) then
+  if up_plugin_analysis.family_base(candidate.base) ~= up_plugin_analysis.family_base(old_analysis.base) then
     return false
   end
-  return up_matching.vendor_ok(c, old)
+  return up_matching.vendor_ok(candidate, old_analysis)
 end
 
-function up_matching.find_candidates(pool, old_or_rec)
-  local old_analysis = old_or_rec
-  if type(old_or_rec) == "table" and old_or_rec.analysis then
-    old_analysis = old_or_rec.analysis
+function up_matching.find_candidates(pool, old_or_record)
+  local old_analysis = old_or_record
+  if type(old_or_record) == "table" and old_or_record.analysis then
+    old_analysis = old_or_record.analysis
   end
   if not old_analysis then
     return {}
@@ -294,18 +295,18 @@ function up_matching.find_candidates(pool, old_or_rec)
   -- offering the identical version back. Newest version + best protocol ranks
   -- first, so the auto-selected replacement is the upgrade.
   local list = {}
-  for _, c in ipairs(pool) do
-    if up_matching.candidate_matches_family(c, old_analysis) then
-      table.insert(list, c)
+  for _, candidate in ipairs(pool) do
+    if up_matching.candidate_matches_family(candidate, old_analysis) then
+      table.insert(list, candidate)
     end
   end
   if #list == 0 then
     -- Fall back to the version/name-flexible token match for broken/missing
     -- plugins (vendor-prefix or artist-suffix asymmetry, e.g. Reaktor5 ->
     -- Reaktor6, "Kick - Nicky Romero" -> "Kick 2", FF Pro MB -> Pro-MB).
-    for _, c in ipairs(pool) do
-      if up_matching.candidate_matches_loose(c, old_analysis) then
-        table.insert(list, c)
+    for _, candidate in ipairs(pool) do
+      if up_matching.candidate_matches_loose(candidate, old_analysis) then
+        table.insert(list, candidate)
       end
     end
   end
@@ -314,18 +315,18 @@ function up_matching.find_candidates(pool, old_or_rec)
     -- name (the .xrns was unreadable and plugin_properties exposed no name), match
     -- on a shared significant token so e.g. "Kick - Nicky Romero" still surfaces
     -- as a "Kick 2" upgrade.
-    for _, c in ipairs(pool) do
-      if up_matching.candidate_matches_shared(c, old_analysis) then
-        table.insert(list, c)
+    for _, candidate in ipairs(pool) do
+      if up_matching.candidate_matches_shared(candidate, old_analysis) then
+        table.insert(list, candidate)
       end
     end
   end
   if #list > 0 then
     table.sort(list, function(a, b)
-      local sa = (a.protocol == old_analysis.protocol) and 1 or 0
-      local sb = (b.protocol == old_analysis.protocol) and 1 or 0
-      if sa ~= sb then return sa > sb end
-      return up_util.rank(a) > up_util.rank(b)
+      local same_protocol_a = (a.protocol == old_analysis.protocol) and 1 or 0
+      local same_protocol_b = (b.protocol == old_analysis.protocol) and 1 or 0
+      if same_protocol_a ~= same_protocol_b then return same_protocol_a > same_protocol_b end
+      return up_plugin_analysis.rank(a) > up_plugin_analysis.rank(b)
     end)
   end
   return list

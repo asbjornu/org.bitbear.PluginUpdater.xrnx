@@ -101,6 +101,11 @@ jobs:
           path: .
 
       - name: Upload coverage to Codecov
+        # On fork PRs GitHub does not provide repo secrets, so the token is
+        # empty; skip the upload there rather than failing CI. When the token
+        # is present (first-party runs) we fail the job on upload errors to
+        # keep CI signal.
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v7
         with:
           files: coverage.lcov

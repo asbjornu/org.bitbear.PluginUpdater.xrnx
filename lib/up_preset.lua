@@ -8,24 +8,24 @@ do
   for i = 1, #chars do _b64map[chars:sub(i, i)] = i - 1 end
 end
 
-local function _b64decode(s)
-  s = s:gsub("[^A-Za-z0-9+/=]", "")
-  local out = {}
+local function _b64decode(encoded)
+  encoded = encoded:gsub("[^A-Za-z0-9+/=]", "")
+  local bytes = {}
   local i = 1
-  while i <= #s do
-    local a = _b64map[s:sub(i, i)] or 0; i = i + 1
-    local b = _b64map[s:sub(i, i)] or 0; i = i + 1
-    local c = s:sub(i, i); i = i + 1
-    local d = s:sub(i, i); i = i + 1
-    local ca = (c ~= "" and c ~= "=") and _b64map[c] or nil
-    local da = (d ~= "" and d ~= "=") and _b64map[d] or nil
-    local n = a * 262144 + b * 4096 + (ca or 0) * 64 + (da or 0)
-    out[#out + 1] = string.char(math.floor(n / 65536) % 256)
-    if ca then out[#out + 1] = string.char(math.floor(n / 256) % 256) end
-    if da then out[#out + 1] = string.char(n % 256) end
-    if not ca then break end
+  while i <= #encoded do
+    local a = _b64map[encoded:sub(i, i)] or 0; i = i + 1
+    local b = _b64map[encoded:sub(i, i)] or 0; i = i + 1
+    local c = encoded:sub(i, i); i = i + 1
+    local d = encoded:sub(i, i); i = i + 1
+    local has_third = (c ~= "" and c ~= "=") and _b64map[c] or nil
+    local has_fourth = (d ~= "" and d ~= "=") and _b64map[d] or nil
+    local n = a * 262144 + b * 4096 + (has_third or 0) * 64 + (has_fourth or 0)
+    bytes[#bytes + 1] = string.char(math.floor(n / 65536) % 256)
+    if has_third then bytes[#bytes + 1] = string.char(math.floor(n / 256) % 256) end
+    if has_fourth then bytes[#bytes + 1] = string.char(n % 256) end
+    if not has_third then break end
   end
-  return table.concat(out)
+  return table.concat(bytes)
 end
 
 -- Reaktor/Kontakt/etc. store the loaded ensemble as a "file://.../Name.ext"
