@@ -7,10 +7,10 @@
 ![Renoise API][renoise-api-badge]
 ![Lua][lua-badge]
 
-A [Renoise][] tool that scans the current song for **outdated or broken
-plugin devices** (track FX chains and instrument plugins), finds the best
-installed candidate, and upgrades them while trying to preserve the
-previous preset/state.
+Plup (short for **Pl**ugin **up**dater) is a [Renoise][] tool that scans
+the current song for **outdated or broken plugin devices** (track FX chains
+and instrument plugins), finds the best installed candidate, and upgrades
+them while trying to preserve the previous preset/state.
 
 ## What it does
 
