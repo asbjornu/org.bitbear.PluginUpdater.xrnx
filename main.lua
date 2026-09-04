@@ -15,11 +15,11 @@ rawset(_G, "arg", false)
 local up_ui = require("up_ui")
 
 renoise.tool():add_menu_entry{
-  name = "Main Menu:Tools:Plugin Updater",
+  name = "Main Menu:Tools:Plup",
   invoke = function() up_ui.show_dialog() end,
 }
 
 renoise.tool():add_keybinding{
-  name = "Global:PluginUpdater:Plugin Updater",
+  name = "Global:Plup:Plup",
   invoke = function() up_ui.show_dialog() end,
 }

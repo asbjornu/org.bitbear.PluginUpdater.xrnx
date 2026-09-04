@@ -1,6 +1,6 @@
 #!/usr/bin/env lua
 ------------------------------------------------------------------------------
--- Dependency-free test runner for the Plugin Updater tool.
+-- Dependency-free test runner for the Plup tool.
 --
 -- Runs under any Lua 5.1+ interpreter (CI uses lua5.1 to match Renoise's
 -- LuaJIT). It mocks the `renoise` global, loads every module, and exercises the

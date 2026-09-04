@@ -20,7 +20,7 @@ function up_scheduler.run(thread_function, on_completion, is_cancelled)
       local succeeded, error_message = coroutine.resume(thread)
       if not succeeded then
         renoise.tool().app_idle_observable:remove_notifier(on_idle_tick)
-        renoise.app():show_warning("Plugin Updater error:\n" .. tostring(error_message))
+        renoise.app():show_warning("Plup error:\n" .. tostring(error_message))
         return
       end
     elseif status == "dead" then

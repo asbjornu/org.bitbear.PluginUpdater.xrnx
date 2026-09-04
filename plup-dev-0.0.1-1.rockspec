@@ -1,10 +1,10 @@
-package = "pluginupdater-dev"
+package = "plup-dev"
 version = "0.0.1-1"
 source = {
-   url = "https://github.com/asbjornu/org.bitbear.PluginUpdater.xrnx",
+   url = "https://github.com/asbjornu/org.bitbear.Plup.xrnx",
 }
 description = {
-   summary = "Dev dependencies for the Plugin Updater Renoise tool",
+   summary = "Dev dependencies for the Plup Renoise tool",
    license = "MIT",
 }
 dependencies = {

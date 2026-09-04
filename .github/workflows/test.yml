@@ -41,7 +41,7 @@ jobs:
         uses: leafo/gh-actions-luarocks@v6
 
       - name: Install dev dependencies from rockspec
-        run: luarocks install --deps-only ./pluginupdater-dev-0.0.1-1.rockspec
+        run: luarocks install --deps-only ./plup-dev-0.0.1-1.rockspec
 
       - name: Run test suite with coverage
         run: lua -lluacov tests/run.lua

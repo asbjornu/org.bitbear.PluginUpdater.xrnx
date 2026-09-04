@@ -2,12 +2,12 @@
 <RenoiseScriptingTool doc_version="0">
   <ApiVersion>6</ApiVersion>
   <AutoUpgraded>true</AutoUpgraded>
-  <Id>org.bitbear.PluginUpdater</Id>
+  <Id>org.bitbear.Plup</Id>
   <Version>1.0.0</Version>
   <Author>Bitbear [post@bitbear.org]</Author>
-  <Name>Plugin Updater</Name>
+  <Name>Plup</Name>
   <Category>plugin vst vst3 au clap upgrade update outdated broken</Category>
   <Description>Scans the current song for outdated or broken plugin devices (track FX and instrument plugins), finds the best installed candidate (preferring CLAP &gt; VST3 &gt; VST &gt; AU and higher versions), and upgrades them while attempting to transfer the previous preset/state. Includes a safe dry-run report mode and never saves the song automatically.</Description>
-  <Homepage>http://github.com/bitbear/org.bitbear.PluginUpdater.xrnx</Homepage>
+  <Homepage>https://github.com/asbjornu/org.bitbear.Plup.xrnx</Homepage>
   <Platform>Windows, Mac, Linux</Platform>
 </RenoiseScriptingTool>

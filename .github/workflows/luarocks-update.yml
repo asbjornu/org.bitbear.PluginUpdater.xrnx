@@ -30,7 +30,7 @@ jobs:
 
       - name: Bump rockspec dependencies to latest
         env:
-          ROCKSPEC: pluginupdater-dev-0.0.1-1.rockspec
+          ROCKSPEC: plup-dev-0.0.1-1.rockspec
           LR_TREE: /tmp/luarocks-bump
         run: |
           python3 - <<'PY'
